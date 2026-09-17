@@ -12,7 +12,17 @@
  * actually requires it.
  */
 
-import { index, integer, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import {
+  check,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 import { money, primaryId, timestamps, tsColumn } from './_shared';
 import { variants } from './catalog';
 import { channels } from './channels';
@@ -55,6 +65,7 @@ export const orders = pgTable(
     index('orders_org_ordered_idx').on(table.orgId, table.orderedAt),
     index('orders_org_status_idx').on(table.orgId, table.status),
     index('orders_import_batch_idx').on(table.importBatchId),
+    check('orders_grand_total_nonneg', sql`${table.grandTotal} >= 0`),
   ],
 );
 
@@ -91,6 +102,8 @@ export const orderLines = pgTable(
     index('order_lines_org_idx').on(table.orgId),
     // 'show me every unmatched line in this tenant' - the preview work queue.
     index('order_lines_org_match_idx').on(table.orgId, table.matchSource),
+    check('order_lines_qty_positive', sql`${table.qty} > 0`),
+    check('order_lines_money_nonneg', sql`${table.unitPrice} >= 0 AND ${table.discount} >= 0`),
   ],
 );
 

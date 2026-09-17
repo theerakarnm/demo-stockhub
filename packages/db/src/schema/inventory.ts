@@ -19,7 +19,8 @@
  * the same SKU otherwise read the same remaining_qty and both deduct it.
  */
 
-import { boolean, index, integer, pgTable, text, uuid } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { boolean, check, index, integer, pgTable, text, uuid } from 'drizzle-orm/pg-core';
 import { money, primaryId, timestamps, tsColumn } from './_shared';
 import { variants } from './catalog';
 import { channels } from './channels';
@@ -86,6 +87,10 @@ export const stockMovements = pgTable(
     // 'what did this order move' - used by cancel and return handling.
     index('stock_movements_order_idx').on(table.orderId),
     index('stock_movements_warehouse_idx').on(table.warehouseId, table.variantId),
+    // The database is the last line of defence, not the code: a zero delta is
+    // never a movement, and the ledger never holds negative money.
+    check('stock_movements_qty_delta_nonzero', sql`${table.qtyDelta} <> 0`),
+    check('stock_movements_cost_nonneg', sql`${table.costTotal} >= 0`),
   ],
 );
 
@@ -134,6 +139,14 @@ export const stockLots = pgTable(
     // table is big enough for it to matter.
     index('stock_lots_fifo_idx').on(table.variantId, table.warehouseId, table.receivedAt, table.id),
     index('stock_lots_remaining_idx').on(table.variantId, table.remainingQty),
+    // Guards the two invariants a code bug must never be able to break:
+    // a layer holds between 0 and its original qty, and costs are never signed.
+    check('stock_lots_qty_positive', sql`${table.qty} > 0`),
+    check(
+      'stock_lots_remaining_range',
+      sql`${table.remainingQty} >= 0 AND ${table.remainingQty} <= ${table.qty}`,
+    ),
+    check('stock_lots_unit_cost_nonneg', sql`${table.unitCost} >= 0`),
   ],
 );
 
@@ -167,6 +180,17 @@ export const movementLotConsumptions = pgTable(
     index('movement_lot_consumptions_movement_idx').on(table.movementId),
     index('movement_lot_consumptions_lot_idx').on(table.lotId),
     index('movement_lot_consumptions_org_idx').on(table.orgId),
+    // Satang integers multiply exactly, so the slice total must equal the
+    // arithmetic. A mismatch here means the applier has a rounding bug.
+    check('movement_lot_consumptions_qty_positive', sql`${table.qty} > 0`),
+    check(
+      'movement_lot_consumptions_costs_nonneg',
+      sql`${table.unitCost} >= 0 AND ${table.lineCost} >= 0`,
+    ),
+    check(
+      'movement_lot_consumptions_line_math',
+      sql`${table.lineCost} = ${table.qty} * ${table.unitCost}`,
+    ),
   ],
 );
 

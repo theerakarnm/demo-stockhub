@@ -12,7 +12,8 @@
  */
 
 import type { ParseIssue } from '@stockhub/core';
-import { index, integer, jsonb, pgTable, text, uuid } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { check, index, integer, jsonb, pgTable, text, uuid } from 'drizzle-orm/pg-core';
 import { primaryId, timestamps, tsColumn } from './_shared';
 import { channels } from './channels';
 import { channelKindEnum, importStatusEnum } from './enums';
@@ -54,6 +55,10 @@ export const importBatches = pgTable(
     index('import_batches_org_created_idx').on(table.orgId, table.createdAt),
     index('import_batches_status_idx').on(table.orgId, table.status),
     index('import_batches_channel_idx').on(table.channelId),
+    check(
+      'import_batches_counters_nonneg',
+      sql`${table.fileSize} >= 0 AND ${table.rowsRead} >= 0 AND ${table.ordersParsed} >= 0`,
+    ),
   ],
 );
 

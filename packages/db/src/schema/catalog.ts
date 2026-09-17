@@ -11,7 +11,17 @@
  * packages/core/src/services/stock/bundle.ts.
  */
 
-import { boolean, index, integer, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import {
+  boolean,
+  check,
+  index,
+  integer,
+  pgTable,
+  text,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 import { money, primaryId, timestamps } from './_shared';
 import { variantKindEnum } from './enums';
 import { orgIdColumn } from './org';
@@ -66,6 +76,7 @@ export const variants = pgTable(
     index('variants_org_idx').on(table.orgId),
     index('variants_product_idx').on(table.productId),
     index('variants_barcode_idx').on(table.orgId, table.barcode),
+    check('variants_money_nonneg', sql`${table.sellingPrice} >= 0 AND ${table.reorderPoint} >= 0`),
   ],
 );
 
@@ -96,6 +107,8 @@ export const bundleComponents = pgTable(
     uniqueIndex('bundle_components_uq').on(table.bundleVariantId, table.componentVariantId),
     index('bundle_components_component_idx').on(table.componentVariantId),
     index('bundle_components_org_idx').on(table.orgId),
+    // A bundle that consumes zero of a component does not need the row.
+    check('bundle_components_qty_min_one', sql`${table.qtyPerBundle} >= 1`),
   ],
 );
 

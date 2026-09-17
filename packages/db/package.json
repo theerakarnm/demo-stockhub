@@ -14,6 +14,7 @@
     "push": "drizzle-kit push",
     "studio": "drizzle-kit studio",
     "seed": "bun run src/seed/index.ts",
+    "test": "bun test",
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "lint": "biome check ."
