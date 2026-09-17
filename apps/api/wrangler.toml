@@ -64,6 +64,26 @@ preview_bucket_name = "stockhub-imports-preview"
 # id = "<your-hyperdrive-id>"
 # localConnectionString = "postgresql://stockhub:stockhub@localhost:5435/stockhub"
 
+# --- Staging environment ---------------------------------------------------
+# The always-on demo environment. Deployed from main on every push (the
+# deploy job in .github/workflows/ci.yml) or manually:
+#   bunx wrangler deploy --env staging
+# It runs demo-role auth (DEMO_MODE=true) exactly like local dev, so the web
+# app can point at it unchanged.
+[env.staging]
+name = "stockhub-api-staging"
+
+[env.staging.vars]
+ENVIRONMENT = "staging"
+API_VERSION = "0.0.0"
+# Staging serves both the deployed web app and a developer laptop.
+CORS_ORIGINS = "http://localhost:3000"
+DEMO_MODE = "true"
+
+[[env.staging.r2_buckets]]
+binding = "IMPORTS_BUCKET"
+bucket_name = "stockhub-imports-staging"
+
 # --- Production environment ------------------------------------------------
 [env.production]
 name = "stockhub-api-production"

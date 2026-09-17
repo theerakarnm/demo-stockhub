@@ -102,6 +102,7 @@ stockhub-demo/
 │   │       ├── services/    orchestration ระหว่าง core + db + adapters
 │   │       ├── middleware/  auth, db, permission, error
 │   │       └── adapters/    R2 storage
+│   ├── runtime-probe/       Worker ทดสอบไลบรารีบน workerd (xlsx, pdf-lib, postgres.js)
 │   └── web/                 Next.js App Router
 │       └── src/
 │           ├── app/         หน้าจอตามลำดับ demo
@@ -223,18 +224,38 @@ bun run dev
 
 ## 9. Deploy
 
-API ขึ้น Cloudflare Workers ส่วน Web ขึ้น Cloudflare Workers หรือ Pages
+มี 3 สภาพแวดล้อม
+
+| สภาพแวดล้อม | ที่อยู่ | วิธี deploy |
+| --- | --- | --- |
+| Local | `wrangler dev` บนพอร์ต 8787 | `bun run dev:api` |
+| Staging | https://stockhub-api-staging.theerakarnm.workers.dev | push ไป `main` (CI จะ deploy เองเมื่อใส่ secret แล้ว) หรือ `cd apps/api && bunx wrangler deploy --env staging` |
+| Production | ยังไม่เปิด | `bunx wrangler deploy --env production` หลังเตรียม resource |
+
+ก่อนเปิด production ให้เตรียม resource ครั้งเดียว
 
 ```bash
-# เตรียม resource ครั้งเดียว
 bunx wrangler r2 bucket create stockhub-imports
 bunx wrangler hyperdrive create stockhub-db --connection-string "postgresql://..."
 # นำ id ที่ได้ไปใส่ใน apps/api/wrangler.toml
-
-cd apps/api && bunx wrangler deploy
 ```
 
+CI บน GitHub Actions (`.github/workflows/ci.yml`) รันทุก push และ PR
+มี 3 job คือ quality, database (migration + seed + guard test) และ build (web build + worker dry-run)
+job สุดท้ายคือ deploy staging ซึ่งต้องตั้ง repo secret สองตัวก่อน คือ `CLOUDFLARE_API_TOKEN` และ `CLOUDFLARE_ACCOUNT_ID`
+
 ค่าลับทั้งหมดตั้งผ่าน `bunx wrangler secret put <NAME>` ห้าม commit ลงไฟล์
+
+### Runtime probe
+
+`apps/runtime-probe` เป็น Worker เล็กที่พิสูจน์ว่าไลบรารีสำคัญทำงานได้บน workerd จริง ได้แก่ อ่าน/เขียน Excel (SheetJS), สร้าง PDF (pdf-lib) และเชื่อม Postgres (postgres.js ผ่าน nodejs_compat)
+
+```bash
+bun run --filter @stockhub/runtime-probe dev   # รันที่ http://localhost:8799
+curl http://localhost:8799/probe/all
+```
+
+มีสำเนา staging ที่ https://stockhub-runtime-probe-staging.theerakarnm.workers.dev/probe/all
 
 ---
 
