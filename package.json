@@ -17,8 +17,8 @@
     "db:push": "bun run --filter @stockhub/db push",
     "db:studio": "bun run --filter @stockhub/db studio",
     "db:seed": "bun run --filter @stockhub/db seed",
-    "docker:up": "docker compose up -d",
-    "docker:down": "docker compose down"
+    "docker:up": "podman-compose up -d",
+    "docker:down": "podman-compose down"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

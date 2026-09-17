@@ -62,7 +62,7 @@ preview_bucket_name = "stockhub-imports-preview"
 # [[hyperdrive]]
 # binding = "HYPERDRIVE"
 # id = "<your-hyperdrive-id>"
-# localConnectionString = "postgresql://stockhub:stockhub@localhost:5432/stockhub"
+# localConnectionString = "postgresql://stockhub:stockhub@localhost:5435/stockhub"
 
 # --- Production environment ------------------------------------------------
 [env.production]

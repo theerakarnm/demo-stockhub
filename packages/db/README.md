@@ -8,11 +8,12 @@ From the repo root:
 
 ```bash
 cp .env.example .env        # DATABASE_URL points at the compose instance
-bun run docker:up           # postgres:16 on localhost:5432
+bun run docker:up           # postgres:16 on localhost:5435 (via podman-compose)
 ```
 
-If port 5432 is already taken by a local Postgres install, change the host port in
-`docker-compose.yml` and in `DATABASE_URL`.
+The compose file maps host port **5435** because 5432-5434 are taken by other
+projects on the development machine. `bun run docker:up` uses `podman-compose`;
+on a machine with Docker, `docker compose up -d` is equivalent.
 
 ## Migrations
 

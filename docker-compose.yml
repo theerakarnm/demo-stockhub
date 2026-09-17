@@ -8,8 +8,9 @@ services:
       POSTGRES_PASSWORD: stockhub
       POSTGRES_DB: stockhub
     ports:
-      # 5432 is often taken by a local Postgres install; change the host port if so.
-      - '5432:5432'
+      # 5432-5434 are taken by other projects on this machine (Homebrew
+      # Postgres + podman containers). 5435 is the StockHub convention.
+      - '5435:5432'
     volumes:
       - stockhub-pgdata:/var/lib/postgresql/data
     healthcheck:

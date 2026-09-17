@@ -155,7 +155,8 @@ bun run dev
 | API | http://localhost:8787 |
 | Drizzle Studio | `bun run db:studio` |
 
-ถ้าพอร์ต 5432 ชนกับ PostgreSQL ที่ลงไว้ในเครื่อง ให้แก้ host port ใน `docker-compose.yml` และ `DATABASE_URL` ให้ตรงกัน
+พอร์ตของ Postgres คือ **5435** (พอร์ต 5432-5434 ในเครื่องนี้ถูกโปรเจกต์อื่นยึดอยู่)
+คำสั่ง `bun run docker:up` ใช้ `podman-compose` ถ้าเครื่องไหนมี Docker จริง ให้รัน `docker compose up -d` แทนได้เลย
 
 ### คำสั่งที่ใช้บ่อย
 

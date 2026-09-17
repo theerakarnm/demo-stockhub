@@ -8,7 +8,7 @@
 
 # Local Postgres started by `docker compose up -d` at the repo root.
 # On a deployed Worker the HYPERDRIVE binding replaces this (see wrangler.toml).
-DATABASE_URL=postgresql://stockhub:stockhub@localhost:5432/stockhub
+DATABASE_URL=postgresql://stockhub:stockhub@localhost:5435/stockhub
 
 # Overrides for the [vars] block while developing.
 ENVIRONMENT=development
