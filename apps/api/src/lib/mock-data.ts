@@ -1,0 +1,489 @@
+/**
+ * MOCK: demo fixtures.
+ *
+ * Every value here is fake. The file exists so apps/web renders the whole flow
+ * before packages/db has data, and so bun tests can assert cost stripping
+ * without a database.
+ *
+ * DELETING THIS FILE IS THE GOAL. Each route that reads from here is marked
+ * `// MOCK:` with the query that must replace it. When the last marker is gone,
+ * delete this module and the tests that import it.
+ *
+ * Shapes match src/types/contract.ts exactly, including the optional cost
+ * fields, so `ok()` can strip them and the web app sees the real contract.
+ */
+
+import type {
+  Channel,
+  CogsReport,
+  DashboardSummary,
+  ImportBatch,
+  Movement,
+  Order,
+  PreviewOrder,
+  StockLotView,
+  StockRow,
+  UnmatchedSku,
+} from '../types/contract';
+
+/** Fixed timestamps keep snapshots and tests stable. */
+const T = {
+  today: '2025-01-15T03:00:00.000Z',
+  yesterday: '2025-01-14T03:00:00.000Z',
+  lastWeek: '2025-01-08T03:00:00.000Z',
+} as const;
+
+export const MOCK_CHANNELS: Channel[] = [
+  {
+    id: 'ch_shopee_main',
+    kind: 'shopee',
+    name: 'Shopee - ร้านหลัก',
+    isActive: true,
+    lastImportedAt: T.today,
+  },
+  {
+    id: 'ch_shopee_two',
+    kind: 'shopee',
+    name: 'Shopee - ร้านที่สอง',
+    isActive: true,
+    lastImportedAt: T.yesterday,
+  },
+  {
+    id: 'ch_lazada_main',
+    kind: 'lazada',
+    name: 'Lazada - ร้านหลัก',
+    isActive: true,
+    lastImportedAt: T.yesterday,
+  },
+  {
+    id: 'ch_tiktok_main',
+    kind: 'tiktok',
+    name: 'TikTok Shop',
+    isActive: true,
+    lastImportedAt: T.lastWeek,
+  },
+  { id: 'ch_pos_shop', kind: 'pos', name: 'หน้าร้าน (POS)', isActive: true, lastImportedAt: null },
+  { id: 'ch_wholesale', kind: 'wholesale', name: 'ขายส่ง', isActive: true, lastImportedAt: null },
+];
+
+export const MOCK_STOCK_ROWS: StockRow[] = [
+  {
+    variantId: 'var_hoe_std',
+    sku: 'HOE-STD-01',
+    name: 'จอบขุดดิน ด้ามไม้ 90 ซม.',
+    kind: 'simple',
+    unit: 'ด้าม',
+    onHand: 148,
+    reserved: 12,
+    available: 136,
+    sellingPrice: 18900,
+    avgUnitCost: 11250,
+    stockValue: 1665000,
+    lowStockThreshold: 30,
+  },
+  {
+    variantId: 'var_sickle_m',
+    sku: 'SIC-M-02',
+    name: 'เคียวเกี่ยวหญ้า คมโค้ง ขนาดกลาง',
+    kind: 'simple',
+    unit: 'อัน',
+    onHand: 22,
+    reserved: 4,
+    available: 18,
+    sellingPrice: 12500,
+    avgUnitCost: 7400,
+    stockValue: 162800,
+    lowStockThreshold: 40,
+  },
+  {
+    variantId: 'var_sprayer_5l',
+    sku: 'SPR-5L-01',
+    name: 'ถังพ่นยาสะพายหลัง 5 ลิตร',
+    kind: 'simple',
+    unit: 'ใบ',
+    onHand: 63,
+    reserved: 9,
+    available: 54,
+    sellingPrice: 45000,
+    avgUnitCost: 29900,
+    stockValue: 1883700,
+    lowStockThreshold: 20,
+  },
+  {
+    variantId: 'var_glove_pair',
+    sku: 'GLV-PR-01',
+    name: 'ถุงมือทำสวน เคลือบยางกันบาด',
+    kind: 'simple',
+    unit: 'คู่',
+    onHand: 410,
+    reserved: 35,
+    available: 375,
+    sellingPrice: 5900,
+    avgUnitCost: 2650,
+    stockValue: 1086500,
+    lowStockThreshold: 100,
+  },
+  {
+    variantId: 'var_bundle_garden',
+    sku: 'SET-GARDEN-01',
+    name: 'ชุดอุปกรณ์ทำสวน 3 ชิ้น',
+    kind: 'bundle',
+    unit: 'ชุด',
+    // A bundle holds no stock of its own. onHand is 0 and `available` is
+    // bundleAvailability() over its components.
+    onHand: 0,
+    reserved: 0,
+    available: 18,
+    sellingPrice: 59000,
+    avgUnitCost: 37550,
+    stockValue: 0,
+    lowStockThreshold: 10,
+  },
+];
+
+export const MOCK_LOTS: StockLotView[] = [
+  {
+    id: 'lot_001',
+    remainingQty: 40,
+    unitCost: 10800,
+    receivedAt: '2024-11-02T02:00:00.000Z',
+    reference: 'PO-2024-118',
+  },
+  {
+    id: 'lot_002',
+    remainingQty: 60,
+    unitCost: 11200,
+    receivedAt: '2024-12-09T02:00:00.000Z',
+    reference: 'PO-2024-142',
+  },
+  {
+    id: 'lot_003',
+    remainingQty: 48,
+    unitCost: 11900,
+    receivedAt: '2025-01-06T02:00:00.000Z',
+    reference: 'PO-2025-003',
+  },
+];
+
+export const MOCK_MOVEMENTS: Movement[] = [
+  {
+    id: 'mv_1001',
+    variantId: 'var_hoe_std',
+    sku: 'HOE-STD-01',
+    name: 'จอบขุดดิน ด้ามไม้ 90 ซม.',
+    reason: 'sale_out',
+    qtyDelta: -3,
+    qtyAfter: 148,
+    channelId: 'ch_shopee_main',
+    orderId: 'ord_sp_0001',
+    unitCost: 11200,
+    totalCost: 33600,
+    occurredAt: T.today,
+    createdBy: 'import:batch_2001',
+  },
+  {
+    id: 'mv_1002',
+    variantId: 'var_glove_pair',
+    sku: 'GLV-PR-01',
+    name: 'ถุงมือทำสวน เคลือบยางกันบาด',
+    reason: 'sale_out',
+    qtyDelta: -10,
+    qtyAfter: 410,
+    channelId: 'ch_lazada_main',
+    orderId: 'ord_lz_0007',
+    unitCost: 2650,
+    totalCost: 26500,
+    occurredAt: T.today,
+    createdBy: 'import:batch_2000',
+  },
+  {
+    id: 'mv_1003',
+    variantId: 'var_sprayer_5l',
+    sku: 'SPR-5L-01',
+    name: 'ถังพ่นยาสะพายหลัง 5 ลิตร',
+    reason: 'purchase_in',
+    qtyDelta: 24,
+    qtyAfter: 63,
+    unitCost: 29900,
+    totalCost: 717600,
+    note: 'รับเข้าจากผู้จำหน่าย PO-2025-003',
+    occurredAt: T.yesterday,
+    createdBy: 'user_demo_stock_staff',
+  },
+  {
+    id: 'mv_1004',
+    variantId: 'var_sickle_m',
+    sku: 'SIC-M-02',
+    name: 'เคียวเกี่ยวหญ้า คมโค้ง ขนาดกลาง',
+    reason: 'return_in',
+    qtyDelta: 1,
+    qtyAfter: 22,
+    channelId: 'ch_shopee_main',
+    orderId: 'ord_sp_0003',
+    unitCost: 7400,
+    totalCost: 7400,
+    note: 'ลูกค้าคืนสินค้า สภาพสมบูรณ์',
+    occurredAt: T.yesterday,
+    createdBy: 'user_demo_stock_staff',
+  },
+  {
+    id: 'mv_1005',
+    variantId: 'var_hoe_std',
+    sku: 'HOE-STD-01',
+    name: 'จอบขุดดิน ด้ามไม้ 90 ซม.',
+    reason: 'cancel_restore',
+    qtyDelta: 2,
+    qtyAfter: 151,
+    channelId: 'ch_tiktok_main',
+    orderId: 'ord_tt_0002',
+    unitCost: 11200,
+    totalCost: 22400,
+    note: 'ออเดอร์ถูกยกเลิกก่อนจัดส่ง',
+    occurredAt: T.lastWeek,
+    createdBy: 'import:batch_1999',
+  },
+];
+
+export const MOCK_ORDERS: Order[] = [
+  {
+    id: 'ord_sp_0001',
+    externalOrderId: '250115ABCD1234',
+    channelId: 'ch_shopee_main',
+    channelKind: 'shopee',
+    status: 'shipped',
+    customerName: 'สมชาย ใจดี',
+    grandTotal: 56700,
+    cogs: 33600,
+    margin: 23100,
+    orderedAt: T.today,
+    lines: [
+      {
+        id: 'ol_1',
+        variantId: 'var_hoe_std',
+        sku: 'HOE-STD-01',
+        name: 'จอบขุดดิน ด้ามไม้ 90 ซม.',
+        quantity: 3,
+        unitPrice: 18900,
+        discount: 0,
+        lineTotal: 56700,
+        totalCost: 33600,
+      },
+    ],
+  },
+  {
+    id: 'ord_pos_0044',
+    externalOrderId: 'POS-0044',
+    channelId: 'ch_pos_shop',
+    channelKind: 'pos',
+    status: 'delivered',
+    customerName: 'ลูกค้าหน้าร้าน',
+    grandTotal: 64900,
+    cogs: 32550,
+    margin: 32350,
+    orderedAt: T.yesterday,
+    lines: [
+      {
+        id: 'ol_2',
+        variantId: 'var_sprayer_5l',
+        sku: 'SPR-5L-01',
+        name: 'ถังพ่นยาสะพายหลัง 5 ลิตร',
+        quantity: 1,
+        unitPrice: 45000,
+        discount: 0,
+        lineTotal: 45000,
+        totalCost: 29900,
+      },
+      {
+        id: 'ol_3',
+        variantId: 'var_glove_pair',
+        sku: 'GLV-PR-01',
+        name: 'ถุงมือทำสวน เคลือบยางกันบาด',
+        quantity: 4,
+        unitPrice: 5900,
+        discount: 3700,
+        lineTotal: 19900,
+        totalCost: 10600,
+      },
+    ],
+  },
+];
+
+export const MOCK_IMPORT_BATCHES: ImportBatch[] = [
+  {
+    id: 'batch_2001',
+    channelId: 'ch_shopee_main',
+    channelKind: 'shopee',
+    fileName: 'Order.all.20250115.xlsx',
+    fileSize: 184320,
+    objectKey: 'imports/org_demo/2025/01/batch_2001/Order.all.20250115.xlsx',
+    status: 'preview_ready',
+    detectionReason: 'found Shopee header "หมายเลขคำสั่งซื้อ"',
+    rowsRead: 128,
+    ordersParsed: 96,
+    unmatchedCount: 2,
+    issueCount: 3,
+    uploadedAt: T.today,
+    appliedAt: null,
+    uploadedBy: 'user_demo_stock_staff',
+  },
+  {
+    id: 'batch_2000',
+    channelId: 'ch_lazada_main',
+    channelKind: 'lazada',
+    fileName: 'lazada-orders-2025-01-14.csv',
+    fileSize: 94210,
+    objectKey: 'imports/org_demo/2025/01/batch_2000/lazada-orders-2025-01-14.csv',
+    status: 'applied',
+    detectionReason: 'found Lazada columns "orderNumber","sellerSku"',
+    rowsRead: 74,
+    ordersParsed: 71,
+    unmatchedCount: 0,
+    issueCount: 1,
+    uploadedAt: T.yesterday,
+    appliedAt: T.yesterday,
+    uploadedBy: 'user_demo_manager',
+  },
+];
+
+export const MOCK_PREVIEW_ORDERS: PreviewOrder[] = [
+  {
+    externalOrderId: '250115ABCD1234',
+    status: 'shipped',
+    orderedAt: T.today,
+    buyerName: 'somchai***',
+    grandTotal: 56700,
+    lines: [
+      {
+        platformSku: 'HOE-STD-01',
+        platformProductName: 'จอบขุดดิน ด้ามไม้ 90 ซม.',
+        quantity: 3,
+        unitPrice: 18900,
+        discount: 0,
+        variantId: 'var_hoe_std',
+        matchedSku: 'HOE-STD-01',
+        matchSource: 'sku_exact',
+      },
+    ],
+  },
+  {
+    externalOrderId: '250115EFGH5678',
+    status: 'confirmed',
+    orderedAt: T.today,
+    buyerName: 'napa***',
+    grandTotal: 64900,
+    lines: [
+      {
+        platformSku: 'set garden 01',
+        platformProductName: 'ชุดอุปกรณ์ทำสวน 3 ชิ้น',
+        quantity: 1,
+        unitPrice: 59000,
+        discount: 0,
+        variantId: 'var_bundle_garden',
+        matchedSku: 'SET-GARDEN-01',
+        matchSource: 'sku_normalised',
+      },
+      {
+        platformSku: 'GLOVE-XL-RED',
+        platformProductName: 'ถุงมือทำสวน สีแดง ไซส์ XL',
+        quantity: 1,
+        unitPrice: 5900,
+        discount: 0,
+        variantId: null,
+        matchedSku: null,
+        matchSource: 'unmatched',
+      },
+    ],
+  },
+];
+
+export const MOCK_UNMATCHED: UnmatchedSku[] = [
+  {
+    platformSku: 'GLOVE-XL-RED',
+    platformProductName: 'ถุงมือทำสวน สีแดง ไซส์ XL',
+    quantity: 7,
+    occurrences: 5,
+    suggestions: [
+      {
+        variantId: 'var_glove_pair',
+        sku: 'GLV-PR-01',
+        name: 'ถุงมือทำสวน เคลือบยางกันบาด',
+        score: 0.72,
+      },
+    ],
+  },
+  {
+    platformSku: 'จอบ90',
+    platformProductName: 'จอบ ด้ามไม้ 90',
+    quantity: 2,
+    occurrences: 2,
+    suggestions: [
+      { variantId: 'var_hoe_std', sku: 'HOE-STD-01', name: 'จอบขุดดิน ด้ามไม้ 90 ซม.', score: 0.61 },
+    ],
+  },
+];
+
+export const MOCK_DASHBOARD: DashboardSummary = {
+  totalSkus: MOCK_STOCK_ROWS.length,
+  totalOnHand: MOCK_STOCK_ROWS.reduce((sum, row) => sum + row.onHand, 0),
+  lowStockCount: MOCK_STOCK_ROWS.filter((row) => row.available <= row.lowStockThreshold).length,
+  stockValue: MOCK_STOCK_ROWS.reduce((sum, row) => sum + (row.stockValue ?? 0), 0),
+  todaySold: 13,
+  pendingImports: MOCK_IMPORT_BATCHES.filter((batch) => batch.status === 'preview_ready').length,
+  unmatchedSkus: MOCK_UNMATCHED.length,
+  byChannel: [
+    {
+      channelId: 'ch_shopee_main',
+      kind: 'shopee',
+      name: 'Shopee - ร้านหลัก',
+      unitsSoldToday: 6,
+      revenueToday: 113400,
+    },
+    {
+      channelId: 'ch_lazada_main',
+      kind: 'lazada',
+      name: 'Lazada - ร้านหลัก',
+      unitsSoldToday: 4,
+      revenueToday: 23600,
+    },
+    {
+      channelId: 'ch_tiktok_main',
+      kind: 'tiktok',
+      name: 'TikTok Shop',
+      unitsSoldToday: 2,
+      revenueToday: 25000,
+    },
+    {
+      channelId: 'ch_pos_shop',
+      kind: 'pos',
+      name: 'หน้าร้าน (POS)',
+      unitsSoldToday: 1,
+      revenueToday: 45000,
+    },
+  ],
+};
+
+export const mockCogsReport = (from: string, to: string): CogsReport => ({
+  from,
+  to,
+  rows: [
+    {
+      date: '2025-01-14',
+      channelId: 'ch_lazada_main',
+      channelName: 'Lazada - ร้านหลัก',
+      unitsSold: 18,
+      revenue: 214300,
+      cogs: 129800,
+      margin: 84500,
+    },
+    {
+      date: '2025-01-15',
+      channelId: 'ch_shopee_main',
+      channelName: 'Shopee - ร้านหลัก',
+      unitsSold: 24,
+      revenue: 338900,
+      cogs: 201450,
+      margin: 137450,
+    },
+  ],
+  totals: { unitsSold: 42, revenue: 553200, cogs: 331250, margin: 221950 },
+});

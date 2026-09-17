@@ -1,0 +1,320 @@
+'use client';
+
+/**
+ * The import preview. Used by /imports/new (step 4) and by /imports/[id], so
+ * the shop sees exactly the same screen whether it just uploaded the file or
+ * came back to it later.
+ *
+ * It renders what the API returned and nothing else: no stock maths, no cost
+ * maths. The only writes it performs are the two endpoints the user asks for,
+ * match and apply.
+ */
+
+import { ChannelBadge, ImportStatusBadge } from '@/components/domain-badges';
+import { ApplyResultPanel } from '@/components/imports/apply-result-panel';
+import { ParseIssuesList } from '@/components/imports/parse-issues-list';
+import { PreviewOrdersTable } from '@/components/imports/preview-orders-table';
+import { UnmatchedPanel } from '@/components/imports/unmatched-panel';
+import { useRole } from '@/components/role-provider';
+import {
+  Button,
+  Card,
+  CardBody,
+  CardHeader,
+  Dialog,
+  EmptyState,
+  buttonClass,
+} from '@/components/ui';
+import { api } from '@/lib/api-client';
+import type { ApiError } from '@/lib/api-error';
+import type { ApplyImportResult, ImportDetailResponse } from '@/lib/api-types';
+import { cn } from '@/lib/cn';
+import { formatDateTime, qty } from '@/lib/format';
+import { useMutation } from '@/lib/use-api';
+import { AlertTriangle, CheckCircle2, ClipboardList, PackageCheck } from 'lucide-react';
+import Link from 'next/link';
+import { useState } from 'react';
+
+export interface ImportPreviewProps {
+  detail: ImportDetailResponse;
+  /** Re-fetch the detail. Called after a SKU match and after a successful apply. */
+  onReload: () => void;
+}
+
+function SummaryStat({
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  label: string;
+  value: number;
+  tone?: 'neutral' | 'good' | 'warn' | 'bad';
+}) {
+  return (
+    <div
+      className={cn(
+        'rounded-lg border px-3 py-2',
+        tone === 'neutral' && 'border-slate-200 bg-white',
+        tone === 'good' && 'border-emerald-200 bg-emerald-50/70',
+        tone === 'warn' && 'border-amber-200 bg-amber-50/70',
+        tone === 'bad' && 'border-rose-200 bg-rose-50/70',
+      )}
+    >
+      <p className="text-xs text-slate-500">{label}</p>
+      <p className="mt-0.5 text-lg font-semibold tabular-nums text-slate-900">{qty(value)}</p>
+    </div>
+  );
+}
+
+/** Applied and failed batches keep no preview payload, so say so plainly. */
+function NoPreviewState({ detail }: { detail: ImportDetailResponse }) {
+  const { batch } = detail;
+
+  if (batch.status === 'failed') {
+    return (
+      <Card className="border-rose-200">
+        <CardBody>
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 size-5 shrink-0 text-rose-600" aria-hidden />
+            <div>
+              <p className="text-sm font-semibold text-slate-900">อ่านไฟล์นี้ไม่สำเร็จ</p>
+              <p className="mt-1 text-xs text-slate-600">
+                {batch.errorMessage ?? 'ระบบอ่านไฟล์นี้ไม่ได้ ลองดาวน์โหลดไฟล์ใหม่จากแพลตฟอร์มแล้วอัปโหลดอีกครั้ง'}
+              </p>
+              <Link href="/imports/new" className={buttonClass('primary', 'sm', 'mt-3')}>
+                อัปโหลดไฟล์ใหม่
+              </Link>
+            </div>
+          </div>
+        </CardBody>
+      </Card>
+    );
+  }
+
+  if (batch.status === 'applied') {
+    return (
+      <Card className="border-emerald-200">
+        <CardBody>
+          <div className="flex items-start gap-3">
+            <PackageCheck className="mt-0.5 size-5 shrink-0 text-emerald-600" aria-hidden />
+            <div>
+              <p className="text-sm font-semibold text-slate-900">ไฟล์นี้ถูกบันทึกเข้าสต็อกแล้ว</p>
+              <p className="mt-1 text-xs text-slate-600">
+                บันทึกเมื่อ {batch.appliedAt ? formatDateTime(batch.appliedAt) : 'ไม่ทราบเวลา'} จำนวน{' '}
+                {qty(batch.ordersParsed)} ออเดอร์ และ {qty(batch.linesParsed)} รายการสินค้า
+                ตัวอย่างข้อมูลจะถูกล้างหลังบันทึก เพื่อให้ข้อมูลจริงอยู่ที่หน้าออเดอร์และความเคลื่อนไหวสต็อก
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Link href="/movements" className={buttonClass('primary', 'sm')}>
+                  ดูความเคลื่อนไหวสต็อก
+                </Link>
+                <Link href="/orders" className={buttonClass('outline', 'sm')}>
+                  ดูออเดอร์
+                </Link>
+              </div>
+            </div>
+          </div>
+        </CardBody>
+      </Card>
+    );
+  }
+
+  // uploaded / parsing / applying, or a file that held no usable order row.
+  return (
+    <Card>
+      <EmptyState
+        title="ยังไม่มีข้อมูลให้ตรวจสอบ"
+        description="ไฟล์นี้ยังไม่มีตัวอย่างข้อมูล อาจกำลังอ่านไฟล์อยู่ หรืออ่านแล้วไม่พบแถวออเดอร์ที่ใช้ได้"
+        icon={<ClipboardList className="size-5" aria-hidden />}
+      />
+    </Card>
+  );
+}
+
+/** 422 unmatched_sku is a normal outcome, not a crash. Explain the next step. */
+function UnmatchedApplyError({ error }: { error: ApiError }) {
+  const raw = error.details?.unmatched;
+  const skus = Array.isArray(raw) ? raw.map((value) => String(value)) : [];
+
+  return (
+    <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5">
+      <p className="text-sm font-medium text-rose-700">ยังยืนยันไม่ได้</p>
+      <p className="mt-0.5 text-xs text-slate-600">{error.message}</p>
+      {skus.length > 0 ? (
+        <p className="mt-1 font-mono text-[11px] text-slate-500">{skus.join(', ')}</p>
+      ) : null}
+    </div>
+  );
+}
+
+export function ImportPreview({ detail, onReload }: ImportPreviewProps) {
+  const { hasPermission } = useRole();
+  const { batch, orders, issues, unmatched } = detail;
+
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [pendingSku, setPendingSku] = useState<string | null>(null);
+
+  const match = useMutation((input: { platformSku: string; variantId: string }) =>
+    api.matchImportSku(batch.id, input),
+  );
+  const apply = useMutation<void, ApplyImportResult>(() => api.applyImport(batch.id));
+
+  const hasPreview = orders.length > 0 || issues.length > 0 || unmatched.length > 0;
+  if (!hasPreview) return <NoPreviewState detail={detail} />;
+
+  const lineCount = orders.reduce((sum, order) => sum + order.lines.length, 0);
+  const unmatchedLines = orders.reduce(
+    (sum, order) => sum + order.lines.filter((line) => line.matchSource === 'unmatched').length,
+    0,
+  );
+  const matchedLines = lineCount - unmatchedLines;
+  const canRun = hasPermission('import:run');
+  const blocked = unmatched.length > 0;
+
+  const handleMatch = async (platformSku: string, variantId: string) => {
+    setPendingSku(platformSku);
+    const saved = await match.run({ platformSku, variantId });
+    setPendingSku(null);
+    if (saved) onReload();
+  };
+
+  const handleApply = async () => {
+    const applied = await apply.run(undefined);
+    setConfirmOpen(false);
+    if (applied) onReload();
+  };
+
+  if (apply.result) return <ApplyResultPanel result={apply.result} />;
+
+  const disabledReason = blocked
+    ? 'ต้องจับคู่ SKU ที่ค้างอยู่ให้ครบก่อน จึงจะยืนยันได้'
+    : !canRun
+      ? 'ตำแหน่งงานของคุณไม่มีสิทธิ์นำเข้าออเดอร์ (ต้องมีสิทธิ์ import:run)'
+      : undefined;
+
+  return (
+    <div className="space-y-4 pb-2">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <SummaryStat label="ออเดอร์ทั้งหมด" value={orders.length} />
+        <SummaryStat label="รายการสินค้า" value={lineCount} />
+        <SummaryStat label="จับคู่แล้ว" value={matchedLines} tone="good" />
+        <SummaryStat
+          label="ยังไม่จับคู่"
+          value={unmatchedLines}
+          tone={unmatchedLines > 0 ? 'bad' : 'good'}
+        />
+        <SummaryStat
+          label="ปัญหาในไฟล์"
+          value={issues.length}
+          tone={issues.length > 0 ? 'warn' : 'neutral'}
+        />
+      </div>
+
+      {match.error ? (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
+          จับคู่ไม่สำเร็จ: {match.error.message}
+        </div>
+      ) : null}
+
+      {unmatched.length > 0 ? (
+        <UnmatchedPanel items={unmatched} pendingSku={pendingSku} onMatch={handleMatch} />
+      ) : (
+        <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-2.5">
+          <CheckCircle2 className="size-4 text-emerald-600" aria-hidden />
+          <p className="text-xs text-slate-700">จับคู่สินค้าครบทุกรายการแล้ว พร้อมยืนยันนำเข้าและตัดสต็อก</p>
+        </div>
+      )}
+
+      <Card>
+        <CardHeader
+          title="ออเดอร์ที่จะนำเข้า"
+          description="กดที่แถวเพื่อดูรายการสินค้าในออเดอร์นั้นและสินค้าในระบบที่จับคู่ไว้"
+          action={
+            batch.channelKind ? (
+              <ChannelBadge kind={batch.channelKind} label={batch.channelName} />
+            ) : batch.detectedKind ? (
+              <ChannelBadge kind={batch.detectedKind} />
+            ) : null
+          }
+        />
+        {orders.length === 0 ? (
+          <EmptyState
+            title="ไม่พบออเดอร์ในไฟล์นี้"
+            description="ระบบอ่านไฟล์ได้ แต่ไม่พบแถวออเดอร์ที่ใช้ได้ ลองตรวจว่าเลือกไฟล์ถูกไฟล์หรือไม่"
+          />
+        ) : (
+          <PreviewOrdersTable orders={orders} />
+        )}
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="ปัญหาที่พบในไฟล์"
+          description="แถวที่มีปัญหาจะไม่ทำให้ทั้งไฟล์ล้ม ระบบข้ามเฉพาะแถวนั้นและรายงานไว้ที่นี่"
+        />
+        <ParseIssuesList issues={issues} />
+      </Card>
+
+      {/* Sticky inside the scrolling <main>, so it never covers the sidebar. */}
+      <div className="sticky bottom-3 z-30 rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm text-slate-700">
+              จะสร้างความเคลื่อนไหวสต็อก {qty(lineCount)} รายการ จาก {qty(orders.length)} ออเดอร์
+            </p>
+            <p className="text-xs text-slate-500">
+              <ImportStatusBadge status={batch.status} />{' '}
+              <span className="ml-1">ยังไม่มีการตัดสต็อกจนกว่าจะกดยืนยัน</span>
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {apply.error ? (
+              apply.error.code === 'unmatched_sku' ? (
+                <UnmatchedApplyError error={apply.error} />
+              ) : (
+                <span className="text-xs text-rose-600">{apply.error.message}</span>
+              )
+            ) : null}
+            <span title={disabledReason}>
+              <Button
+                size="lg"
+                loading={apply.pending}
+                disabled={blocked || !canRun}
+                onClick={() => setConfirmOpen(true)}
+              >
+                ยืนยันนำเข้าและตัดสต็อก
+              </Button>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <Dialog
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        title="ยืนยันนำเข้าและตัดสต็อก"
+        description="ตรวจสอบตัวเลขอีกครั้งก่อนบันทึก"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)}>
+              ยกเลิก
+            </Button>
+            <Button loading={apply.pending} onClick={handleApply}>
+              ยืนยัน
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-2 text-sm text-slate-700">
+          <p>
+            ระบบจะบันทึก {qty(orders.length)} ออเดอร์ และตัดสต็อกรวม {qty(lineCount)} รายการ
+            จากคลังกลางด้วยวิธีต้นทุนแบบเข้าก่อนออกก่อน (FIFO)
+          </p>
+          <p className="text-xs text-slate-500">
+            ถ้าอัปโหลดไฟล์เดิมซ้ำ ระบบจะไม่ตัดสต็อกซ้ำ เพราะใช้เลขที่ออเดอร์ของแพลตฟอร์มเป็นตัวกันซ้ำ
+          </p>
+        </div>
+      </Dialog>
+    </div>
+  );
+}

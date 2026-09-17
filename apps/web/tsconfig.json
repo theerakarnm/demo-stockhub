@@ -1,0 +1,28 @@
+{
+  // Extends the strict monorepo base. Everything below is either required by
+  // Next.js or a deliberate, documented relaxation.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // --- Next.js requirements -------------------------------------------------
+    "jsx": "preserve",
+    "plugins": [{ "name": "next" }],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "allowJs": true,
+    "noEmit": true,
+    "incremental": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    // Next generates .d.ts files for routes; emitting our own would fight it.
+    "declaration": false,
+    "declarationMap": false,
+    // --- Deliberate relaxation ------------------------------------------------
+    // The base sets verbatimModuleSyntax + noUncheckedIndexedAccess and BOTH are
+    // kept here on purpose: `import type` is already the house style and the
+    // extra index checks caught real bugs in the table code.
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules", ".next"]
+}

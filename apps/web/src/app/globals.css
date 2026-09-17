@@ -1,0 +1,34 @@
+/* Tailwind CSS v4. The theme is declared here, not in a tailwind.config.ts. */
+@import "tailwindcss";
+
+@theme {
+  /* Brand accent. StockHub uses one green so the UI stays calm and dense. */
+  --color-brand-50: oklch(0.97 0.02 155);
+  --color-brand-500: oklch(0.7 0.14 158);
+  --color-brand-600: oklch(0.6 0.13 158);
+  --color-brand-700: oklch(0.52 0.12 158);
+
+  /* Injected by next/font in src/app/layout.tsx. */
+  --font-sans: var(--font-thai), ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+    font-family: var(--font-sans);
+  }
+
+  /* Thai text needs a little more line height to stay readable when dense. */
+  :lang(th) {
+    line-height: 1.65;
+  }
+
+  /* Tabular figures everywhere numbers are compared in a column. */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}

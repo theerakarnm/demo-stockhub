@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    // The Worker runtime is not Node and not the browser. Cloudflare's own
+    // global types describe R2Bucket, Hyperdrive, Request/Response and friends.
+    // @types/bun is here only for the `bun test` file in this package.
+    "types": ["@cloudflare/workers-types", "@types/bun"]
+  },
+  "include": ["src/**/*.ts"]
+}

@@ -1,0 +1,17 @@
+# ---------------------------------------------------------------------------
+# Copy to apps/api/.dev.vars for `wrangler dev`. .dev.vars is gitignored.
+# PLACEHOLDERS ONLY in this file. Never put a real credential here.
+#
+# In production these are Worker secrets, not vars:
+#   bunx wrangler secret put DATABASE_URL
+# ---------------------------------------------------------------------------
+
+# Local Postgres started by `docker compose up -d` at the repo root.
+# On a deployed Worker the HYPERDRIVE binding replaces this (see wrangler.toml).
+DATABASE_URL=postgresql://stockhub:stockhub@localhost:5432/stockhub
+
+# Overrides for the [vars] block while developing.
+ENVIRONMENT=development
+API_VERSION=0.0.0-dev
+CORS_ORIGINS=http://localhost:3000
+DEMO_MODE=true

@@ -1,0 +1,29 @@
+# deps
+node_modules/
+.pnp.*
+
+# build
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# cloudflare
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+
+# env
+.env
+.env.*
+!.env.example
+
+# logs / os
+*.log
+.DS_Store
+coverage/
+
+# local demo data (real customer exports must never be committed)
+/data/local/

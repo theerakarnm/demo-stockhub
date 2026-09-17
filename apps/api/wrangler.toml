@@ -1,0 +1,84 @@
+# ---------------------------------------------------------------------------
+# StockHub API - Cloudflare Workers config.
+#
+# Why wrangler.toml and not wrangler.jsonc: this file is mostly documentation
+# for the next developer (which binding exists, which command creates it), and
+# TOML keeps those comments next to the value they explain without the JSON
+# comma/brace noise. Every Cloudflare doc example for R2 + Hyperdrive is also
+# published in TOML, so copy/paste stays literal. If you later generate this
+# file from a script, switch to wrangler.jsonc instead.
+#
+# Resource NAMES below are safe local defaults, so `wrangler dev` starts on a
+# fresh clone with no Cloudflare account: the dev runtime simulates R2 on disk.
+# Resource IDS are fake placeholders wrapped in <angle brackets>; replace them
+# before you deploy. Never commit a real id, token, or connection string here.
+#
+# Note: a bucket name must be lowercase alphanumeric with hyphens, 3 to 63
+# characters. A <placeholder> in `bucket_name` makes `wrangler dev` refuse to
+# start, which is why these carry real-looking names instead.
+# ---------------------------------------------------------------------------
+
+name = "stockhub-api"
+main = "src/index.ts"
+compatibility_date = "2024-12-18"
+
+# nodejs_compat gives us node:buffer / node:stream, which the Postgres driver
+# used by @stockhub/db needs on Workers.
+compatibility_flags = ["nodejs_compat"]
+
+workers_dev = true
+
+[observability]
+enabled = true
+
+# --- Plain variables (non secret) ------------------------------------------
+[vars]
+ENVIRONMENT = "development"
+API_VERSION = "0.0.0"
+# Comma separated list of origins allowed to call this API from a browser.
+CORS_ORIGINS = "http://localhost:3000"
+# Demo mode turns on the `x-demo-role` header auth. Set "false" once real auth
+# lands, so the demo middleware can hard-fail instead of silently trusting it.
+DEMO_MODE = "true"
+
+# --- R2: original uploaded order export files ------------------------------
+# Local `wrangler dev` simulates this bucket, so nothing to do to run the demo.
+# Before deploying, create the real one:
+#   bunx wrangler r2 bucket create stockhub-imports
+# Keep every uploaded file forever. It is the evidence trail behind a movement.
+[[r2_buckets]]
+binding = "IMPORTS_BUCKET"
+bucket_name = "stockhub-imports-dev"
+preview_bucket_name = "stockhub-imports-preview"
+
+# --- Hyperdrive: pooled Postgres access from the edge ----------------------
+# Workers open a fresh connection per request, which would exhaust Postgres.
+# Hyperdrive pools and caches on Cloudflare's side. Create it with:
+#   bunx wrangler hyperdrive create stockhub-db \
+#     --connection-string="postgresql://USER:PASSWORD@HOST:5432/stockhub"
+# Then paste the returned id here and uncomment the block.
+# Locally you do not need it: `wrangler dev` reads DATABASE_URL from .dev.vars
+# (see src/middleware/db.ts for the resolution order).
+# [[hyperdrive]]
+# binding = "HYPERDRIVE"
+# id = "<your-hyperdrive-id>"
+# localConnectionString = "postgresql://stockhub:stockhub@localhost:5432/stockhub"
+
+# --- Production environment ------------------------------------------------
+[env.production]
+name = "stockhub-api-production"
+
+[env.production.vars]
+ENVIRONMENT = "production"
+API_VERSION = "0.0.0"
+CORS_ORIGINS = "https://<your-web-domain>"
+# Production must never accept a role from a request header.
+DEMO_MODE = "false"
+
+[[env.production.r2_buckets]]
+binding = "IMPORTS_BUCKET"
+bucket_name = "stockhub-imports"
+
+# [[env.production.hyperdrive]]
+# binding = "HYPERDRIVE"
+# id = "<your-production-hyperdrive-id>"

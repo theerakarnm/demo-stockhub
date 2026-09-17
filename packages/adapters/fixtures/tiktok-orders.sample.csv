@@ -1,0 +1,6 @@
+Order ID,Order Status,Order Substatus,Created Time,Shipped Time,Seller SKU,SKU ID,Product Name,Variation,Quantity,SKU Unit Original Price,SKU Seller Discount,SKU Subtotal After Discount,Order Amount,Buyer Username
+The unique ID of the order,Current status of the order,Detailed status of the order,Time the order was created,Time the parcel was handed over,SKU code set by the seller,TikTok Shop SKU ID,Name of the product,Product variation,Number of units,Original unit price,Discount funded by the seller,Subtotal after discount,Total paid by the buyer,Buyer account name
+577000000000000001,Completed,Delivered,14/02/2026 09:30:00,14/02/2026 18:05:00,HOE-001,17290000000000001,จอบถางหญ้า ด้ามไม้ 4 หุน,ด้ามยาว 120 ซม.,1,259.00,0.00,259.00,259.00,demo_tiktok_a
+577000000000000002,Awaiting shipment,Awaiting collection,15/02/2026 11:02:19,,MACHETE-01,17290000000000002,มีดพร้าด้ามยาว 14 นิ้ว,ปลายงอ,2,320.00,40.00,600.00,930.00,demo_tiktok_b
+577000000000000002,Awaiting shipment,Awaiting collection,15/02/2026 11:02:19,,WCAN-5L,17290000000000003,บัวรดน้ำพลาสติก 5 ลิตร,สีเขียว,1,129.00,0.00,129.00,930.00,demo_tiktok_b
+577000000000000003,Cancelled,Cancelled by buyer,15/02/2026 20:41:07,,SPRAY-16L,17290000000000004,เครื่องพ่นยาสะพายหลัง 16 ลิตร,แบบมือโยก,1,1890.00,0.00,1890.00,1890.00,demo_tiktok_c

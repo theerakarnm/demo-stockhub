@@ -1,0 +1,19 @@
+{
+  "name": "@stockhub/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ports": "./src/ports/index.ts",
+    "./domain": "./src/domain/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}

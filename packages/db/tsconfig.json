@@ -1,0 +1,8 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Bun types give us process.env + the bun:* modules used by the seed runner.
+    "types": ["bun"]
+  },
+  "include": ["src/**/*.ts", "drizzle.config.ts"]
+}
