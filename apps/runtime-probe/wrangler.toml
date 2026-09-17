@@ -1,0 +1,39 @@
+# ---------------------------------------------------------------------------
+# StockHub runtime probe - Wave 0 risk burner.
+#
+# Purpose: prove on the REAL workerd runtime (not Node) that the three
+# libraries the demo depends on actually work there, before they are load
+# bearing near demo day:
+#   /probe/xlsx  SheetJS read + write, and the adapter pipeline decode path
+#   /probe/pdf   pdf-lib document generation
+#   /probe/pg    postgres.js over nodejs_compat, the @stockhub/db driver path
+#
+# Run locally against the seeded Postgres:
+#   bun install
+#   bun run --filter @stockhub/runtime-probe dev
+#   curl http://localhost:8799/probe/all
+#
+# Deploy to staging:
+#   bun run --filter @stockhub/runtime-probe deploy:staging
+# ---------------------------------------------------------------------------
+
+name = "stockhub-runtime-probe"
+main = "src/index.ts"
+compatibility_date = "2024-12-18"
+
+# postgres.js needs node:net / node:buffer / node:crypto on workerd.
+compatibility_flags = ["nodejs_compat"]
+
+workers_dev = true
+
+[observability]
+enabled = true
+
+[vars]
+ENVIRONMENT = "development"
+
+[env.staging]
+name = "stockhub-runtime-probe-staging"
+
+[env.staging.vars]
+ENVIRONMENT = "staging"

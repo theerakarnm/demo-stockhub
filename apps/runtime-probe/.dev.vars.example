@@ -1,0 +1,4 @@
+# Copy to .dev.vars for local `wrangler dev`. Never commit the filled file.
+# Local podman Postgres started by `bun run docker:up`.
+DATABASE_URL=postgresql://stockhub:stockhub@localhost:5435/stockhub
+ENVIRONMENT=development
