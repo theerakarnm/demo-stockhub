@@ -92,17 +92,17 @@ Owner: child `wave3-track-h`, branch `wave3-track-h`, database `stockhub_h`.
 
 Server side is already done by earlier waves: `createPosOrder`, `cancelOrder` and `returnOrder` exist in `apps/api/src/services/order-service.ts` with routes under `apps/api/src/routes/orders.ts`. This track is screen work plus the print view.
 
-- [ ] H1 Fast billing screen
+- [x] H1 Fast billing screen
   - Rewrite `apps/web/src/app/orders/new/page.tsx` from mock to real.
   - Customer select loads from `/customers` and shows the tier name; after selection each line price previews through `/pricing/resolve` so the tier price is visible before submitting.
   - Product search over the catalog, live on-hand per variant while selling, quantity inputs, line totals and grand total in baht.
   - Submit through `POST /orders` with `channelKind` `pos` or `wholesale` and the chosen `customerId`, then redirect to the new detail page from H2.
   - Gate the page with `PermissionGate` on `order:create`. Commit: `Build the real billing screen`
-- [ ] H2 Order detail page with cancel and return
+- [x] H2 Order detail page with cancel and return
   - New page `apps/web/src/app/orders/[id]/page.tsx`: bill header (customer, tier name, channel, status), lines with unit price and line total, grand total, and the actions the status allows.
   - Cancel calls `POST /orders/:id/cancel` after a confirm dialog that says stock returns. Return opens a small dialog for per-line quantities and restock flag, calling `POST /orders/:id/return`.
   - Loading, empty and error states. Link from the orders list rows. Commit: `Add order detail with cancel and return`
-- [ ] H3 Thai printable bill
+- [x] H3 Thai printable bill
   - New route `apps/web/src/app/orders/[id]/print/page.tsx` rendering a clean A4 bill in Thai: seller header placeholder, bill number, date, customer with phone, lines, totals, thank-you note.
   - No cost fields ever appear on the bill. Use the wire order shape, which is already stripped server side.
   - `@media print` CSS hides all app chrome, and a visible button calls `window.print()`. Link to it from the detail page.
