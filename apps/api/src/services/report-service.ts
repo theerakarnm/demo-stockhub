@@ -13,7 +13,7 @@
  * never disagree by an hour.
  */
 
-import { bundleAvailability, satang } from '@stockhub/core';
+import { asChannelId, bundleAvailability, satang } from '@stockhub/core';
 import {
   catalogRepo,
   channelRepo,
@@ -25,6 +25,8 @@ import {
 import type {
   ChannelSalesReport,
   ChannelSalesRow,
+  CogsReport,
+  CogsReportRow,
   DashboardChannelStat,
   DashboardSummary,
   VarianceReasonTotal,
@@ -209,4 +211,69 @@ export const getVarianceReport = async (
   );
 
   return { days: query.days, from: from.toISOString(), to: now.toISOString(), rows };
+};
+
+/**
+ * GET /reports/cogs?from&to - sales, FIFO cost and margin per day and channel.
+ *
+ * `from`/`to` are Bangkok calendar dates; the query window is
+ * [from midnight, to midnight + 1 day) so the `to` date is inclusive, which
+ * is what the date pickers on the screen promise.
+ */
+export const getCogsReport = async (
+  ctx: ServiceContext,
+  query: { from: string; to: string; channelId?: string },
+): Promise<CogsReport> => {
+  const exec = ctx.db();
+  const orgId = ctx.auth.orgId;
+  const fromAt = new Date(`${query.from}T00:00:00+07:00`);
+  const toAt = new Date(new Date(`${query.to}T00:00:00+07:00`).getTime() + MS_PER_DAY);
+
+  const [groups, channels] = await Promise.all([
+    movementRepo.listCogsByDayChannel(exec, { orgId, from: fromAt, to: toAt }),
+    channelRepo.listChannels(exec, { orgId }),
+  ]);
+  const channelById = new Map(channels.map((channel) => [channel.id, channel]));
+  const wanted = query.channelId ? asChannelId(query.channelId) : undefined;
+
+  const rows: CogsReportRow[] = groups
+    .filter((group) => wanted === undefined || group.channelId === wanted)
+    .flatMap((group) => {
+      const channel = channelById.get(group.channelId);
+      if (!channel) return [];
+      return [
+        {
+          date: group.day,
+          channelId: group.channelId,
+          channelName: channel.name,
+          kind: channel.kind,
+          unitsSold: group.unitsSold,
+          revenue: satang(group.revenue),
+          cogs: satang(group.cogs),
+          margin: satang(group.revenue - group.cogs),
+        },
+      ];
+    });
+
+  const totals = rows.reduce(
+    (acc, row) => ({
+      unitsSold: acc.unitsSold + row.unitsSold,
+      revenue: acc.revenue + row.revenue,
+      cogs: acc.cogs + (row.cogs ?? 0),
+      margin: acc.margin + (row.margin ?? 0),
+    }),
+    { unitsSold: 0, revenue: 0, cogs: 0, margin: 0 },
+  );
+
+  return {
+    from: query.from,
+    to: query.to,
+    rows,
+    totals: {
+      unitsSold: totals.unitsSold,
+      revenue: satang(totals.revenue),
+      cogs: satang(totals.cogs),
+      margin: satang(totals.margin),
+    },
+  };
 };

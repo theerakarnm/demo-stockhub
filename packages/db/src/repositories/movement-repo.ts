@@ -480,3 +480,69 @@ export const listVarianceGroups = async (
     movements: Number(row.movements),
   }));
 };
+
+export interface CogsDayChannelRow {
+  /** Calendar day in Asia/Bangkok, 'YYYY-MM-DD'. */
+  day: string;
+  channelId: string;
+  unitsSold: number;
+  revenue: number;
+  /** Sum of the FIFO lot slices the sales consumed, in satang. */
+  cogs: number;
+}
+
+/**
+ * COGS per day and channel from movement_lot_consumptions.
+ *
+ * The consumption rows are the audit truth for what a sale cost; the movement
+ * total is only their sum. Correlated scalar subqueries (one per movement,
+ * summed per group) keep both the consumption join and the order-line revenue
+ * join from fanning out the units.
+ */
+export const listCogsByDayChannel = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId; from: Date; to: Date },
+): Promise<CogsDayChannelRow[]> => {
+  const dayExpr = sql<string>`to_char(${stockMovements.occurredAt} at time zone 'Asia/Bangkok', 'YYYY-MM-DD')`;
+  const rows = await exec
+    .select({
+      day: dayExpr.as('day'),
+      channelId: sql<string>`${stockMovements.channelId}`.as('channel_id'),
+      unitsSold: sql<number>`sum(-${stockMovements.qtyDelta})::int`.as('units_sold'),
+      // The outer references are written table-qualified on purpose: in a
+      // single-table query drizzle emits bare column names, and inside the
+      // subquery a bare order_id / movement_id would resolve to the INNER
+      // table, silently correlating to nothing.
+      revenue: sql<number>`coalesce(sum((
+          select coalesce(sum(ol.qty * ol.unit_price - ol.discount), 0)
+          from order_lines ol
+          where ol.order_id = stock_movements.order_id
+            and ol.variant_id = stock_movements.variant_id
+        )), 0)::bigint`.as('revenue'),
+      cogs: sql<number>`coalesce(sum((
+          select coalesce(sum(mlc.line_cost), 0)
+          from movement_lot_consumptions mlc
+          where mlc.movement_id = stock_movements.id
+        )), 0)::bigint`.as('cogs'),
+    })
+    .from(stockMovements)
+    .where(
+      and(
+        eq(stockMovements.orgId, params.orgId),
+        eq(stockMovements.reason, 'sale_out'),
+        gte(stockMovements.occurredAt, params.from),
+        lte(stockMovements.occurredAt, params.to),
+        // A sale always carries a channel; guard anyway so the wire type holds.
+        sql`${stockMovements.channelId} is not null`,
+      ),
+    )
+    .groupBy(dayExpr, stockMovements.channelId)
+    .orderBy(desc(dayExpr), stockMovements.channelId);
+  return rows.map((row) => ({
+    day: row.day,
+    channelId: row.channelId,
+    unitsSold: Number(row.unitsSold),
+    revenue: Number(row.revenue),
+    cogs: Number(row.cogs),
+  }));
+};

@@ -505,29 +505,40 @@ export interface VarianceQuery {
 // GET /api/v1/reports/cogs - requires the `cost:read` permission
 // ---------------------------------------------------------------------------
 
+/** One row of GET /reports/cogs: sales, FIFO cost and margin of one channel
+ *  on one Bangkok day. The whole endpoint answers 403 without cost:read, so
+ *  the optional cost fields here only document the wire shape. */
 export interface CogsReportRow {
-  variantId: string;
-  sku: string;
-  name: string;
-  qtySold: number;
+  /** Bangkok calendar day, 'YYYY-MM-DD'. */
+  date: string;
+  channelId: string;
+  channelName: string;
+  kind: ChannelKind;
+  unitsSold: number;
   revenue: MoneyAmount;
-  cogs: MoneyAmount;
-  grossProfit: MoneyAmount;
-  /** 0-100, one decimal. */
-  marginPct: number;
+  /** cost-gated */
+  cogs?: MoneyAmount;
+  /** cost-gated - revenue minus cogs, computed by the API. */
+  margin?: MoneyAmount;
 }
 
 export interface CogsReportResponse {
   from: string;
   to: string;
-  totalRevenue: MoneyAmount;
-  totalCogs: MoneyAmount;
-  grossProfit: MoneyAmount;
-  marginPct: number;
   rows: CogsReportRow[];
+  totals: {
+    unitsSold: number;
+    revenue: MoneyAmount;
+    /** cost-gated */
+    cogs?: MoneyAmount;
+    /** cost-gated */
+    margin?: MoneyAmount;
+  };
 }
 
 export interface CogsQuery {
+  /** Bangkok calendar date, 'YYYY-MM-DD'. Inclusive. */
   from?: string;
+  /** Bangkok calendar date, 'YYYY-MM-DD'. Inclusive. */
   to?: string;
 }

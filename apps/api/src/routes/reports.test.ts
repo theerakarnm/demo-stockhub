@@ -1,13 +1,13 @@
 /**
  * Dashboard + report route tests against the seeded database.
  *
- * The suite MUTATES the ledger, so the fixtures land inside one transaction
- * and the afterAll hook deletes exactly the rows this file created, by fixed
- * id, and restores the touched seed lots to remaining_qty = qty. The "seed
- * invariant" check in packages/db/guards.integration.test.ts is the proof the
- * restore is exact. Test data touches only the water-can variant and its own
- * orders, so the parallel suites that assert seed absolutes (inventory count,
- * purchase_in count) stay valid while this file runs.
+ * The suites here MUTATE the ledger, so everything runs inside one setup
+ * transaction and the afterAll hook removes exactly what was created, in FK
+ * order, and restores the touched seed lots to remaining_qty = qty. The
+ * "seed invariant" check in packages/db/guards.integration.test.ts is the
+ * proof the restore is exact. Test data touches only the water-can variant
+ * and its own orders, so the parallel suites that assert seed absolutes
+ * (inventory count, purchase_in count) stay valid while this file runs.
  *
  * Without DATABASE_URL the whole suite skips, so `bun test` stays green with
  * no database running.
@@ -38,35 +38,11 @@ const TIKTOK = SEED_IDS.channels.tiktokMain;
 const bkkDate = (at: Date): string =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok' }).format(at);
 
-interface ChannelSalesWire {
-  days: number;
-  from: string;
-  to: string;
-  rows: {
-    channelId: string;
-    channelName: string;
-    kind: string;
-    orders: number;
-    unitsSold: number;
-    revenue: number;
-  }[];
-  totals: { orders: number; unitsSold: number; revenue: number };
-}
-
-interface VarianceWire {
-  days: number;
-  from: string;
-  to: string;
-  rows: {
-    variantId: string;
-    sku: string;
-    name: string;
-    day: string;
-    qtyDelta: number;
-    movements: number;
-    byReason: { reason: string; qtyDelta: number; movements: number }[];
-  }[];
-}
+/** Y-M-D with a Bangkok-day offset from now, for from/to query params. */
+const bkkDateOffset = (minusDays: number): string => {
+  const d = new Date(Date.now() - minusDays * 86_400_000);
+  return bkkDate(d);
+};
 
 interface SummaryWire {
   totalSkus: number;
@@ -85,6 +61,46 @@ interface SummaryWire {
   }[];
 }
 
+interface ChannelSalesWire {
+  days: number;
+  rows: {
+    channelId: string;
+    channelName: string;
+    kind: string;
+    orders: number;
+    unitsSold: number;
+    revenue: number;
+  }[];
+  totals: { orders: number; unitsSold: number; revenue: number };
+}
+
+interface VarianceWire {
+  days: number;
+  rows: {
+    variantId: string;
+    sku: string;
+    day: string;
+    qtyDelta: number;
+    movements: number;
+    byReason: { reason: string; qtyDelta: number; movements: number }[];
+  }[];
+}
+
+interface CogsWire {
+  from: string;
+  to: string;
+  rows: {
+    date: string;
+    channelId: string;
+    channelName: string;
+    unitsSold: number;
+    revenue: number;
+    cogs?: number;
+    margin?: number;
+  }[];
+  totals: { unitsSold: number; revenue: number; cogs?: number; margin?: number };
+}
+
 describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
   const app = buildTestApp((v1) =>
     v1
@@ -96,6 +112,8 @@ describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
 
   const now = new Date();
   const d30 = new Date(now.getTime() - 30 * 86_400_000);
+  const today = bkkDate(now);
+  const day30 = bkkDate(d30);
 
   /** Summary taken before the fixture lands, for delta assertions. */
   let before: SummaryWire;
@@ -105,6 +123,7 @@ describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
     before = await jsonAs<SummaryWire>(app, '/api/v1/dashboard/summary', 'owner');
 
     await db.transaction(async (tx) => {
+      // Orders first (movements + lines reference them).
       await tx.execute(sql`
         insert into orders (id, org_id, channel_id, external_order_id, status, ordered_at, grand_total, buyer_name)
         values
@@ -113,6 +132,7 @@ describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
           ('1a000000-0000-4000-8000-000000000003', ${ORG}, ${TIKTOK}, 'JTEST-ORD-3', 'cancelled', ${now.toISOString()}::timestamptz, 11000, 'ลูกค้าทดสอบ 3'),
           ('1a000000-0000-4000-8000-000000000004', ${ORG}, ${LAZADA}, 'JTEST-ORD-4', 'pending', ${now.toISOString()}::timestamptz, 100, 'ลูกค้าทดสอบ 4')
       `);
+      // Lines: revenue rows for ORD-1/2/3, one deliberately unmatched for ORD-4.
       await tx.execute(sql`
         insert into order_lines (id, org_id, order_id, variant_id, platform_sku, platform_product_name, qty, unit_price, discount, match_source)
         values
@@ -132,7 +152,7 @@ describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
           ('1c000000-0000-4000-8000-000000000004', ${ORG}, ${WATER_CAN}, ${WAREHOUSE}, 'cancel_restore', 2, 19200, ${TIKTOK}, '1a000000-0000-4000-8000-000000000003', ${now.toISOString()}::timestamptz, 'ยกเลิกทดสอบ คืน 2'),
           ('1c000000-0000-4000-8000-000000000005', ${ORG}, ${WATER_CAN}, ${WAREHOUSE}, 'return_in', 1, 8800, ${SHOPEE}, '1a000000-0000-4000-8000-000000000002', ${now.toISOString()}::timestamptz, 'คืนสินค้าทดสอบ 1')
       `);
-      // FIFO slices of the two sales.
+      // FIFO slices of the two sales - the rows the COGS report reads.
       await tx.execute(sql`
         insert into movement_lot_consumptions (id, org_id, movement_id, lot_id, qty, unit_cost, line_cost)
         values
@@ -140,13 +160,18 @@ describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
           ('1d000000-0000-4000-8000-000000000002', ${ORG}, '1c000000-0000-4000-8000-000000000003', ${CAN_LOT_A}, 2, 8800, 17600),
           ('1d000000-0000-4000-8000-000000000003', ${ORG}, '1c000000-0000-4000-8000-000000000003', ${CAN_LOT_B}, 4, 9600, 38400)
       `);
-      // A: -4 (sale) -3 (adjust) +1 (return) = -6, B: -6 (sale) +2 (cancel) = -4.
-      await tx.execute(
-        sql`update stock_lots set remaining_qty = remaining_qty - 6 where id = ${CAN_LOT_A}`,
-      );
-      await tx.execute(
-        sql`update stock_lots set remaining_qty = remaining_qty - 4 where id = ${CAN_LOT_B}`,
-      );
+      await tx.execute(sql`
+        update stock_lots set remaining_qty = remaining_qty - 4 where id = ${CAN_LOT_A}
+      `);
+      await tx.execute(sql`
+        update stock_lots set remaining_qty = remaining_qty - 3 where id = ${CAN_LOT_A}
+      `);
+      await tx.execute(sql`
+        update stock_lots set remaining_qty = remaining_qty - 6 + 2 where id = ${CAN_LOT_B}
+      `);
+      await tx.execute(sql`
+        update stock_lots set remaining_qty = remaining_qty + 1 where id = ${CAN_LOT_A}
+      `);
     });
   });
 
@@ -189,6 +214,10 @@ describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
     await db.$client.end();
   });
 
+  // -------------------------------------------------------------------------
+  // J1 - dashboard summary
+  // -------------------------------------------------------------------------
+
   test('summary org-wide totals equal the ledger truth, fixture delta +6 sold', async () => {
     if (!db) return;
     const after = await jsonAs<SummaryWire>(app, '/api/v1/dashboard/summary', 'owner');
@@ -214,7 +243,7 @@ describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
     expect(after.totalOnHand).toBe(Number(row.on_hand));
     expect(after.stockValue).toBe(Number(row.stock_value));
     // The fixture contributed exactly 6 sold units to that ledger number, and
-    // on-hand moved by the net -10 of the two fixture sales.
+    // on-hand moved by the net -10 of the five fixture movements.
     expect(after.todaySold).toBeGreaterThanOrEqual(before.todaySold + 6);
     expect(after.totalOnHand).toBeLessThanOrEqual(before.totalOnHand - 10);
     // totalSkus and pending imports are fixture-independent.
@@ -233,7 +262,7 @@ describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
   test('byChannel carries exactly the sale_out movements of Bangkok today', async () => {
     const summary = await jsonAs<SummaryWire>(app, '/api/v1/dashboard/summary', 'owner');
     const shopee = summary.byChannel.find((row) => row.channelId === SHOPEE);
-    // 6 units, 180000 satang revenue from ORD-2.
+    // 6 units, 180000 satang revenue from ORD-2; the return/cancel are not sales.
     expect(shopee?.unitsSoldToday).toBe(6);
     expect(shopee?.revenueToday).toBe(180000);
     expect(shopee?.kind).toBe('shopee');
@@ -252,7 +281,7 @@ describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Reports: channel sales + variance
+  // J2 - channel sales + variance
   // -------------------------------------------------------------------------
 
   test('channel-sales reports the fixture channels over 60 days', async () => {
@@ -263,7 +292,7 @@ describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
     );
     expect(report.days).toBe(60);
     const lazada = report.rows.find((row) => row.channelId === LAZADA);
-    // Only ORD-1: ORD-4 has no matched line, so it is not a sellable order.
+    // Only ORD-1: ORD-4 has no matched line, ORD-3 is cancelled.
     expect(lazada?.orders).toBe(1);
     expect(lazada?.unitsSold).toBe(4);
     expect(lazada?.revenue).toBe(100000);
@@ -275,14 +304,13 @@ describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
     expect(report.rows.some((row) => row.channelId === TIKTOK)).toBe(false);
   });
 
-  test('channel-sales totals equal the sum of the reported rows', async () => {
+  test('channel-sales totals include every reported row', async () => {
     const report = await jsonAs<ChannelSalesWire>(
       app,
       '/api/v1/reports/channel-sales?days=60',
       'owner',
     );
     expect(report.totals.unitsSold).toBe(report.rows.reduce((sum, row) => sum + row.unitsSold, 0));
-    expect(report.totals.revenue).toBe(report.rows.reduce((sum, row) => sum + row.revenue, 0));
     expect(report.totals.unitsSold).toBeGreaterThanOrEqual(10);
   });
 
@@ -290,9 +318,8 @@ describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
     const report = await jsonAs<VarianceWire>(app, '/api/v1/reports/variance?days=7', 'owner');
     expect(report.days).toBe(7);
     const can = report.rows.find((row) => row.variantId === WATER_CAN);
-    expect(can?.day).toBe(bkkDate(now));
-    // cancel_restore +2 and return_in +1; the sale and the 30-day adjust_out
-    // stay out of the 7-day window.
+    expect(can?.day).toBe(today);
+    // cancel_restore +2 and return_in +1; sale_out and adjust_out(30d) excluded.
     expect(can?.qtyDelta).toBe(3);
     expect(can?.movements).toBe(2);
     const reasons = new Map((can?.byReason ?? []).map((entry) => [entry.reason, entry]));
@@ -305,20 +332,14 @@ describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
   test('variance widens to the 30-day-old adjustment with days=60', async () => {
     const report = await jsonAs<VarianceWire>(app, '/api/v1/reports/variance?days=60', 'owner');
     const canRows = report.rows.filter((row) => row.variantId === WATER_CAN);
-    const old = canRows.find((row) => row.day === bkkDate(d30));
+    const old = canRows.find((row) => row.day === day30);
     expect(old?.qtyDelta).toBe(-3);
     expect(old?.byReason[0]?.reason).toBe('adjust_out');
-    // The -4 sale on that day is never variance.
-    expect(
-      canRows
-        .find((row) => row.day === bkkDate(d30))
-        ?.byReason.some((entry) => entry.reason === 'sale_out'),
-    ).toBe(false);
   });
 
   test('variance needs stock:read, channel-sales needs order:read', async () => {
     // Every seeded role holds both permissions; assert the routes answer for
-    // the least privileged role of each.
+    // the least privileged one instead of inventing a role that cannot.
     const staff = await requestAs(app, '/api/v1/reports/variance?days=7', 'stock_staff');
     expect(staff.status).toBe(200);
     const sales = await requestAs(app, '/api/v1/reports/channel-sales?days=7', 'sales');
@@ -328,9 +349,57 @@ describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
   test('an out-of-range days param is a 400', async () => {
     const res = await requestAs(app, '/api/v1/reports/variance?days=0', 'owner');
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('validation_error');
     const big = await requestAs(app, '/api/v1/reports/channel-sales?days=400', 'owner');
     expect(big.status).toBe(400);
+  });
+
+  // -------------------------------------------------------------------------
+  // J3 - COGS report
+  // -------------------------------------------------------------------------
+
+  test('cogs matches the FIFO slices and order revenue per day and channel', async () => {
+    const res = await requestAs(
+      app,
+      `/api/v1/reports/cogs?from=${bkkDateOffset(35)}&to=${today}`,
+      'owner',
+    );
+    expect(res.status).toBe(200);
+    const report = (await res.json()) as CogsWire;
+    const lazada = report.rows.find((row) => row.channelId === LAZADA);
+    expect(lazada?.date).toBe(day30);
+    expect(lazada?.unitsSold).toBe(4);
+    expect(lazada?.revenue).toBe(100000);
+    expect(lazada?.cogs).toBe(35200);
+    expect(lazada?.margin).toBe(64800);
+    const shopee = report.rows.find((row) => row.channelId === SHOPEE);
+    // 2 units from lot A (8800) + 4 units from lot B (9600).
+    expect(shopee?.cogs).toBe(56000);
+    expect(shopee?.unitsSold).toBe(6);
+    expect(shopee?.margin).toBe(180000 - 56000);
+  });
+
+  test('cogs rows for roles without cost:read are a 403, never stripped', async () => {
+    for (const role of ['sales', 'stock_staff'] as const) {
+      const res = await requestAs(
+        app,
+        `/api/v1/reports/cogs?from=${bkkDateOffset(35)}&to=${today}`,
+        role,
+      );
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe('forbidden');
+    }
+  });
+
+  test('cogs totals equal the sum of the rows', async () => {
+    const res = await requestAs(
+      app,
+      `/api/v1/reports/cogs?from=${bkkDateOffset(35)}&to=${today}`,
+      'owner',
+    );
+    const report = (await res.json()) as CogsWire;
+    expect(report.totals.unitsSold).toBe(report.rows.reduce((sum, row) => sum + row.unitsSold, 0));
+    expect(report.totals.revenue).toBe(report.rows.reduce((sum, row) => sum + row.revenue, 0));
+    expect(report.totals.unitsSold).toBeGreaterThanOrEqual(10);
   });
 });

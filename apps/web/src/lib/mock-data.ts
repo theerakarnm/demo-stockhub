@@ -961,33 +961,34 @@ let mockOrders: Order[] = orderSeed.map(
 // COGS report
 // ---------------------------------------------------------------------------
 
-/** [variantId, qtySold, revenue (satang), cogs (satang)] */
-type CogsSeed = [string, number, number, number];
+/** [day offset from today, channel id, unitsSold, revenue (satang), cogs (satang)] */
+type CogsSeed = [number, string, number, number, number];
 
 const COGS_SEED: CogsSeed[] = [
-  ['var_hoe_4h', 86, 1_591_000, 962_400],
-  ['var_nozzle_brass', 240, 2_136_000, 1_172_400],
-  ['var_urea_50', 62, 4_836_000, 3_875_000],
-  ['var_sprayer_16', 9, 1_701_000, 1_192_500],
-  ['var_machete_12', 44, 699_600, 415_800],
-  ['var_pruner_24', 12, 504_000, 333_600],
-  ['var_gloves_l', 120, 780_000, 402_000],
+  [1, 'ch_shopee_main', 24, 338_900, 201_450],
+  [1, 'ch_lazada_main', 18, 214_300, 129_800],
+  [2, 'ch_shopee_main', 12, 189_500, 112_700],
+  [2, 'ch_tiktok_main', 7, 96_400, 58_300],
+  [3, 'ch_pos_shop', 5, 78_200, 44_900],
 ];
 
-const cogsRows: CogsReportRow[] = COGS_SEED.map(([variantId, qtySold, revenue, cogs]) => {
-  const variant = MOCK_VARIANTS.find((v) => v.id === variantId);
-  const grossProfit = revenue - cogs;
-  return {
-    variantId,
-    sku: variant?.sku ?? 'UNKNOWN',
-    name: variant?.name ?? 'ไม่พบสินค้า',
-    qtySold,
-    revenue,
-    cogs,
-    grossProfit,
-    marginPct: Number(((grossProfit / revenue) * 100).toFixed(1)),
-  };
-});
+const cogsRows: CogsReportRow[] = COGS_SEED.map(
+  ([daysAgo, channelId, unitsSold, revenue, cogs]) => {
+    const channel = MOCK_CHANNELS.find((c) => c.id === channelId);
+    const day = new Date();
+    day.setDate(day.getDate() - daysAgo);
+    return {
+      date: day.toISOString().slice(0, 10),
+      channelId,
+      channelName: channel?.name ?? 'ไม่พบช่องทาง',
+      kind: channel?.kind ?? 'manual',
+      unitsSold,
+      revenue,
+      cogs,
+      margin: revenue - cogs,
+    };
+  },
+);
 
 // ---------------------------------------------------------------------------
 // Sample import file - powers the "ใช้ไฟล์ตัวอย่าง" button on /imports/new
@@ -1386,17 +1387,22 @@ export const mockApi = {
         permission: 'cost:read',
       });
     }
-    const totalRevenue = cogsRows.reduce((sum, r) => sum + r.revenue, 0);
-    const totalCogs = cogsRows.reduce((sum, r) => sum + r.cogs, 0);
-    const grossProfit = totalRevenue - totalCogs;
+    const from = query.from ?? '';
+    const to = query.to ?? '9999-12-31';
+    const scoped = cogsRows.filter((row) => row.date >= from && row.date <= to);
     return {
-      from: query.from ?? iso(30).slice(0, 10),
+      from: query.from ?? cogsRows[0]?.date ?? iso(30).slice(0, 10),
       to: query.to ?? iso(0).slice(0, 10),
-      totalRevenue,
-      totalCogs,
-      grossProfit,
-      marginPct: Number(((grossProfit / totalRevenue) * 100).toFixed(1)),
-      rows: cogsRows,
+      rows: scoped,
+      totals: scoped.reduce(
+        (acc, row) => ({
+          unitsSold: acc.unitsSold + row.unitsSold,
+          revenue: acc.revenue + row.revenue,
+          cogs: acc.cogs + (row.cogs ?? 0),
+          margin: acc.margin + (row.margin ?? 0),
+        }),
+        { unitsSold: 0, revenue: 0, cogs: 0, margin: 0 },
+      ),
     };
   },
 };

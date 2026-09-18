@@ -275,6 +275,7 @@ export interface CogsReportRow {
   date: string;
   channelId: string;
   channelName: string;
+  kind: ChannelKind;
   unitsSold: number;
   revenue: MoneyOnWire;
   /** cost field */

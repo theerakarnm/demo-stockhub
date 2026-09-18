@@ -24,7 +24,6 @@ export const cogsReportQuery = z
     from: z.string().date(),
     to: z.string().date(),
     channelId: idString.optional(),
-    groupBy: z.enum(['day', 'channel', 'variant']).default('day'),
   })
   .refine((value) => value.from <= value.to, { message: '`from` must not be after `to`' });
 
