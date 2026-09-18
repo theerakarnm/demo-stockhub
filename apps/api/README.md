@@ -118,6 +118,9 @@ Tier fields (`priceTierId`, `priceTierCode`, `priceTierName`, `tierPrices`, `pri
 | `GET /api/v1/price-tiers/matrix` | `price_tier:read` | none | `PriceMatrixRow[]` |
 | `PUT /api/v1/price-tiers/:id/prices` | `price_tier:write` | body: `{ prices: TierPriceCell[] }`, 1-500 cells, `price: null` deletes a cell | `{ upserted, deleted }` |
 | `GET /api/v1/pricing/resolve` | `price_tier:read` | query: `variantIds` comma-separated, plus `customerId` or `priceTierId` | `PriceResolutionView[]` in the requested order, unknown variant answers 404 |
+| `GET /api/v1/catalog/search?q=&limit=` | `stock:read` | query: `q` 1-120 chars, `limit` 1-50 (default 10) | `CatalogSearchRow[]` |
+| `POST /api/v1/listings` | `import:run` | body: `SaveListingInput` | `SaveListingResult` |
+| `GET /api/v1/listings?channelId=` | `stock:read` | query: `channelId` optional | `ListingView[]` |
 
 ## Error contract
 
