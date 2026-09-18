@@ -15,7 +15,7 @@ import {
   type OrgId,
   StockHubError,
 } from '@stockhub/core';
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import type { DbExecutor } from '../client';
 import {
   type NewOrder,
@@ -166,4 +166,26 @@ export const setOrderStatus = async (
     })
     .where(and(eq(orders.orgId, params.orgId), eq(orders.id, params.orderId)));
   return { previous: current.status };
+};
+
+// ---------------------------------------------------------------------------
+// Report aggregates (read only).
+// ---------------------------------------------------------------------------
+
+/**
+ * Distinct platform SKUs still waiting for a manual match - the work queue
+ * counter on the dashboard. Order lines keep their platform SKU after the
+ * order is stored, so this covers every tenant-wide unmatched line.
+ */
+export const countDistinctUnmatchedSkus = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId },
+): Promise<number> => {
+  const [row] = await exec
+    .select({
+      skus: sql<number>`count(distinct ${orderLines.platformSku})::int`.as('skus'),
+    })
+    .from(orderLines)
+    .where(and(eq(orderLines.orgId, params.orgId), eq(orderLines.matchSource, 'unmatched')));
+  return Number(row?.skus ?? 0);
 };

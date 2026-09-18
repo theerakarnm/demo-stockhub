@@ -7,11 +7,13 @@
  *   3. THE HEADLINE FEATURE: the same route returns cost fields to `owner` and
  *      returns the same payload WITHOUT them to `sales`
  *
- * The inventory / variant / movement assertions moved to routes/inventory.test.ts,
- * and the order assertions to routes/orders.test.ts - both run against the
- * seeded database and skip without DATABASE_URL. The tests here still run on
- * the MOCK data in src/lib/mock-data.ts on purpose: the dashboard keeps
- * rendering while its real queries are unbuilt.
+ * The inventory / variant / movement assertions live in routes/inventory.test.ts,
+ * the order assertions in routes/orders.test.ts, and the dashboard + report
+ * assertions in routes/reports.test.ts - all against the seeded database,
+ * skipped without DATABASE_URL. The dashboard and the reports compute from
+ * real stock data now, so the data-dependent tests here are gated the same
+ * way; channels and imports still answer from src/lib/mock-data.ts until
+ * their tracks wire them.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -54,7 +56,9 @@ describe('me', () => {
   });
 });
 
-describe('cost hiding (the demo headline)', () => {
+const url = process.env.DATABASE_URL;
+
+describe.skipIf(!url)('cost hiding (the demo headline)', () => {
   test('dashboard hides stockValue from sales', async () => {
     type Summary = { totalSkus: number; stockValue?: number; byChannel: unknown[] };
     const owner = await jsonAs<Summary>(app, '/api/v1/dashboard/summary', 'owner');
@@ -67,7 +71,7 @@ describe('cost hiding (the demo headline)', () => {
 });
 
 describe('permissions', () => {
-  test('the COGS report is blocked for sales and allowed for owner', async () => {
+  test('the COGS report is blocked for sales before any query runs', async () => {
     const denied = await requestAs(
       app,
       '/api/v1/reports/cogs?from=2025-01-01&to=2025-01-31',
@@ -76,15 +80,6 @@ describe('permissions', () => {
     expect(denied.status).toBe(403);
     const body = (await denied.json()) as { error: { code: string; details?: unknown } };
     expect(body.error.code).toBe('forbidden');
-
-    const allowed = await requestAs(
-      app,
-      '/api/v1/reports/cogs?from=2025-01-01&to=2025-01-31',
-      'owner',
-    );
-    expect(allowed.status).toBe(200);
-    const report = (await allowed.json()) as { totals: { cogs?: number } };
-    expect(report.totals.cogs).toBeGreaterThan(0);
   });
 
   test('an invalid date range fails validation', async () => {

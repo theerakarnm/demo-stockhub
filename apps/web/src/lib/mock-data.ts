@@ -1053,11 +1053,10 @@ export const mockApi = {
       unmatchedSkus: mockUnmatched.length,
       byChannel: MOCK_CHANNELS.map((channel, index) => ({
         channelId: channel.id,
-        channelName: channel.name,
         kind: channel.kind,
-        onHand: 420 - index * 37,
-        todaySold: [12, 4, 7, 2, 5, 2, 8, 3][index] ?? 0,
-        stockValue: 1_240_000 - index * 96_000,
+        name: channel.name,
+        unitsSoldToday: [12, 4, 7, 2, 5, 2, 8, 3][index] ?? 0,
+        revenueToday: 553_200 - index * 61_000,
       })),
     };
     return gate(summary);

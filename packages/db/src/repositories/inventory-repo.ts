@@ -307,6 +307,78 @@ export const applyLotDeltas = async (
 };
 
 /**
+ * One row per active variant with the numbers the dashboard summary needs.
+ *
+ * Same two aggregates as getStockOverview (open lots + confirmed reservations)
+ * but unpaginated and without the search window: the summary must see every
+ * variant or its totals contradict the inventory list screen.
+ */
+export interface StockPositionRow {
+  variantId: VariantId;
+  kind: 'simple' | 'bundle';
+  onHand: number;
+  reserved: number;
+  /** Cost field. The API strips it per role through ok(). */
+  stockValue: number;
+  reorderPoint: number;
+}
+
+export const getStockPositionByVariant = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId },
+): Promise<StockPositionRow[]> => {
+  // Open FIFO layers only, exactly like the overview: a closed lot feeds
+  // neither quantity nor value. bigint sums can arrive as strings depending on
+  // the driver, hence the Number() mapping in the return.
+  const lotTotals = exec
+    .select({
+      variantId: stockLots.variantId,
+      onHand: sql<number>`sum(${stockLots.remainingQty})::int`.as('on_hand'),
+      stockValue: sql<
+        string | number
+      >`sum(${stockLots.remainingQty} * ${stockLots.unitCost})::bigint`.as('stock_value'),
+    })
+    .from(stockLots)
+    .where(and(eq(stockLots.orgId, params.orgId), gt(stockLots.remainingQty, 0)))
+    .groupBy(stockLots.variantId)
+    .as('lot_totals');
+
+  const reservedTotals = exec
+    .select({
+      variantId: orderLines.variantId,
+      reserved: sql<number>`sum(${orderLines.qty})::int`.as('reserved'),
+    })
+    .from(orderLines)
+    .innerJoin(orders, eq(orders.id, orderLines.orderId))
+    .where(and(eq(orderLines.orgId, params.orgId), eq(orders.status, 'confirmed')))
+    .groupBy(orderLines.variantId)
+    .as('reserved_totals');
+
+  const rows = await exec
+    .select({
+      variantId: variants.id,
+      kind: variants.kind,
+      onHand: lotTotals.onHand,
+      reserved: reservedTotals.reserved,
+      stockValue: lotTotals.stockValue,
+      reorderPoint: variants.reorderPoint,
+    })
+    .from(variants)
+    .leftJoin(lotTotals, eq(lotTotals.variantId, variants.id))
+    .leftJoin(reservedTotals, eq(reservedTotals.variantId, variants.id))
+    .where(and(eq(variants.orgId, params.orgId), eq(variants.isActive, true)));
+
+  return rows.map((row) => ({
+    variantId: asVariantId(row.variantId),
+    kind: row.kind,
+    onHand: row.onHand ?? 0,
+    reserved: row.reserved ?? 0,
+    stockValue: Number(row.stockValue ?? 0),
+    reorderPoint: row.reorderPoint,
+  }));
+};
+
+/**
  * The warehouse marketplace imports feed when the caller did not pick one.
  * Exactly one warehouse per org carries `is_default`; if the org has none the
  * caller cannot proceed, so this throws `not_found` instead of returning null.

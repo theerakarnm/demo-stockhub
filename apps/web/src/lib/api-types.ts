@@ -107,15 +107,16 @@ export interface Channel {
 // GET /api/v1/dashboard/summary
 // ---------------------------------------------------------------------------
 
+/**
+ * Today's sales of one channel, straight from the movement ledger. Revenue is
+ * selling money, not cost, so it is never stripped.
+ */
 export interface DashboardChannelStat {
   channelId: string;
-  channelName: string;
   kind: ChannelKind;
-  /** Units currently attributable to this channel's listings. */
-  onHand: number;
-  todaySold: number;
-  /** cost-gated */
-  stockValue?: MoneyAmount;
+  name: string;
+  unitsSoldToday: number;
+  revenueToday: MoneyAmount;
 }
 
 export interface DashboardSummary {

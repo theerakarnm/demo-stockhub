@@ -31,7 +31,7 @@ import {
   buttonClass,
 } from '@/components/ui';
 import { api } from '@/lib/api-client';
-import { formatRelative, qty } from '@/lib/format';
+import { baht, formatRelative, qty } from '@/lib/format';
 import { useApi } from '@/lib/use-api';
 import {
   AlertTriangle,
@@ -140,11 +140,11 @@ export default function DashboardPage() {
       </section>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
-        {/* Per-channel stock: the "one pool, many shops" picture. */}
+        {/* Today's sales per channel, straight from the movement ledger. */}
         <Card className="xl:col-span-3">
           <CardHeader
-            title="สต็อกตามช่องทางขาย"
-            description="ทุกช่องทางตัดสต็อกจากคลังกลางเดียวกัน"
+            title="ขายวันนี้ตามช่องทาง"
+            description="ตัวเลขเดียวกับที่ตัดสต็อกจริงในคลังกลาง"
             action={
               <Link
                 href="/settings/channels"
@@ -155,12 +155,9 @@ export default function DashboardPage() {
               </Link>
             }
           />
-          {loading ? <TableSkeleton rows={6} cols={4} /> : null}
+          {loading ? <TableSkeleton rows={6} cols={3} /> : null}
           {data && data.byChannel.length === 0 ? (
-            <EmptyState
-              title="ยังไม่มีช่องทางขาย"
-              description="เพิ่มร้านค้าออนไลน์หรือหน้าร้านก่อน เพื่อเริ่มตัดสต็อก"
-            />
+            <EmptyState title="ยังไม่มียอดขายวันนี้" description="เมื่อมีออเดอร์ตัดสต็อกวันนี้ ตัวเลขจะแสดงที่นี่" />
           ) : null}
           {data && data.byChannel.length > 0 ? (
             <TableWrap>
@@ -169,9 +166,8 @@ export default function DashboardPage() {
                   <Tr>
                     <Th>ช่องทาง</Th>
                     <Th>ชื่อร้าน</Th>
-                    <Th numeric>คงเหลือ</Th>
-                    <Th numeric>ขายวันนี้</Th>
-                    <Th numeric>มูลค่าสต็อก</Th>
+                    <Th numeric>หน่วยที่ขาย</Th>
+                    <Th numeric>ยอดขาย</Th>
                   </Tr>
                 </Thead>
                 <Tbody>
@@ -180,14 +176,9 @@ export default function DashboardPage() {
                       <Td>
                         <ChannelBadge kind={channel.kind} />
                       </Td>
-                      <Td className="max-w-[16rem] truncate text-slate-900">
-                        {channel.channelName}
-                      </Td>
-                      <Td numeric>{qty(channel.onHand)}</Td>
-                      <Td numeric>{qty(channel.todaySold)}</Td>
-                      <Td numeric>
-                        <CostValue value={channel.stockValue} />
-                      </Td>
+                      <Td className="max-w-[16rem] truncate text-slate-900">{channel.name}</Td>
+                      <Td numeric>{qty(channel.unitsSoldToday)}</Td>
+                      <Td numeric>{baht(channel.revenueToday)}</Td>
                     </Tr>
                   ))}
                 </Tbody>
