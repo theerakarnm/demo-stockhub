@@ -5,9 +5,11 @@
  *
  * The screen collects lines and posts them to POST /api/v1/orders. It never
  * touches stock or cost itself: the API runs the FIFO consume inside one
- * transaction and answers with the saved order.
+ * transaction and answers with the saved order, and the page redirects to the
+ * bill's own detail page (/orders/[id]) where cancel / return / print live.
  */
 
+import { mergeAvailability } from '@/components/orders/availability';
 import type { CartLine, CartLinePatch } from '@/components/orders/cart';
 import { CartTable, cartTotalOf, discountOf, unitPriceOf } from '@/components/orders/cart';
 import type { ManualChannelKind } from '@/components/orders/channel-kind-toggle';
@@ -16,7 +18,8 @@ import { CustomerPicker } from '@/components/orders/customer-picker';
 import { OrderSummaryCard } from '@/components/orders/order-summary-card';
 import { ProductPicker } from '@/components/orders/product-picker';
 import { repriceLines } from '@/components/orders/reprice';
-import { useRole } from '@/components/role-provider';
+import { useLiveAvailability } from '@/components/orders/use-live-availability';
+import { PermissionGate } from '@/components/permission-gate';
 import {
   Button,
   Card,
@@ -31,20 +34,40 @@ import { api } from '@/lib/api-client';
 import { pricingApi } from '@/lib/api-pricing';
 import type { CreateOrderInput, StockRow } from '@/lib/api-types';
 import type { CustomerView } from '@/lib/api-types-pricing';
-import { baht } from '@/lib/format';
 import { useMutation } from '@/lib/use-api';
-import { CheckCircle2, ShoppingCart } from 'lucide-react';
+import { ShoppingCart } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-export default function NewOrderPage() {
-  const { hasPermission } = useRole();
+/** Shown instead of the bill when the role may not open one (e.g. stock staff). */
+function NoAccessCard() {
+  return (
+    <>
+      <PageHeader title="เปิดบิลขาย" description="บันทึกการขายหน้าร้านหรือขายส่ง" />
+      <Card>
+        <EmptyState
+          title="ตำแหน่งงานของคุณไม่สามารถเปิดบิลขายได้"
+          description="การเปิดบิลต้องมีสิทธิ์ order:create ลองสลับตำแหน่งงานที่มุมขวาบน หรือติดต่อผู้ดูแลระบบ"
+          action={
+            <Link href="/orders" className={buttonClass('outline', 'sm')}>
+              กลับไปหน้าออเดอร์
+            </Link>
+          }
+        />
+      </Card>
+    </>
+  );
+}
+
+function BillingForm() {
   const [channelKind, setChannelKind] = useState<ManualChannelKind>('pos');
   const [customerName, setCustomerName] = useState('');
   const [note, setNote] = useState('');
   const [lines, setLines] = useState<CartLine[]>([]);
   const [customer, setCustomer] = useState<CustomerView | null>(null);
 
+  const router = useRouter();
   const createOrder = useMutation((input: CreateOrderInput) => api.createOrder(input));
 
   const addLine = useCallback((row: StockRow) => {
@@ -78,13 +101,13 @@ export default function NewOrderPage() {
     setLines((current) => current.filter((line) => line.variantId !== variantId));
   }, []);
 
-  const resetBill = useCallback(() => {
-    setLines([]);
-    setCustomerName('');
-    setNote('');
-    setCustomer(null);
-    createOrder.reset();
-  }, [createOrder]);
+  // Stock keeps moving while the bill is open (an import can apply, another
+  // till can sell), so the cart re-reads each variant's available balance.
+  const balances = useLiveAvailability(lines.map((line) => line.variantId));
+  useEffect(() => {
+    if (balances.size === 0) return;
+    setLines((current) => mergeAvailability(current, balances));
+  }, [balances]);
 
   // Reprice every untouched line whenever the picked customer changes or a
   // line is added. Touched lines are left alone by repriceLines.
@@ -112,68 +135,25 @@ export default function NewOrderPage() {
   const canSubmit = lines.length > 0 && lines.every((line) => unitPriceOf(line) > 0);
 
   const submit = useCallback(() => {
-    void createOrder.run({
-      channelKind,
-      customerName: customerName.trim() || undefined,
-      customerId: customer?.id,
-      note: note.trim() || undefined,
-      lines: lines.map((line) => ({
-        variantId: line.variantId,
-        quantity: line.quantity,
-        unitPrice: unitPriceOf(line),
-        discount: discountOf(line),
-      })),
-    });
-  }, [channelKind, createOrder, customer, customerName, lines, note]);
-
-  // Guard first: `sales` may open a bill, `stock_staff` may not.
-  if (!hasPermission('order:create')) {
-    return (
-      <>
-        <PageHeader title="เปิดบิลขาย" description="บันทึกการขายหน้าร้านหรือขายส่ง" />
-        <Card>
-          <EmptyState
-            title="ตำแหน่งงานของคุณไม่สามารถเปิดบิลขายได้"
-            description="การเปิดบิลต้องมีสิทธิ์ order:create ลองสลับตำแหน่งงานที่มุมขวาบน หรือติดต่อผู้ดูแลระบบ"
-            action={
-              <Link href="/orders" className={buttonClass('outline', 'sm')}>
-                กลับไปหน้าออเดอร์
-              </Link>
-            }
-          />
-        </Card>
-      </>
-    );
-  }
-
-  const created = createOrder.result;
-  if (created) {
-    return (
-      <>
-        <PageHeader title="บันทึกบิลแล้ว" description="ระบบตัดสต็อกและคิดต้นทุนแบบ FIFO ให้เรียบร้อย" />
-        <Card>
-          <CardBody className="flex flex-col items-center gap-3 py-12 text-center">
-            <span className="flex size-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
-              <CheckCircle2 className="size-6" aria-hidden />
-            </span>
-            <p className="text-sm font-medium text-slate-900">บันทึกบิลเรียบร้อย</p>
-            <p className="font-mono text-xs text-slate-500">{created.id}</p>
-            <p className="text-sm text-slate-600">
-              ยอดรวม{' '}
-              <span className="font-semibold text-slate-900">{baht(created.grandTotal)}</span> (
-              {created.lines.length} รายการ)
-            </p>
-            <div className="mt-2 flex items-center gap-2">
-              <Button onClick={resetBill}>เปิดบิลใหม่</Button>
-              <Link href="/orders" className={buttonClass('outline', 'md')}>
-                ดูรายการออเดอร์
-              </Link>
-            </div>
-          </CardBody>
-        </Card>
-      </>
-    );
-  }
+    void createOrder
+      .run({
+        channelKind,
+        customerName: customerName.trim() || undefined,
+        customerId: customer?.id,
+        note: note.trim() || undefined,
+        lines: lines.map((line) => ({
+          variantId: line.variantId,
+          quantity: line.quantity,
+          unitPrice: unitPriceOf(line),
+          discount: discountOf(line),
+        })),
+      })
+      // The bill's own page is the single place that shows, cancels, returns
+      // and prints it - land there instead of a local success panel.
+      .then((created) => {
+        if (created) router.push(`/orders/${created.id}`);
+      });
+  }, [channelKind, createOrder, customer, customerName, lines, note, router]);
 
   return (
     <>
@@ -264,5 +244,13 @@ export default function NewOrderPage() {
         </div>
       </div>
     </>
+  );
+}
+
+export default function NewOrderPage() {
+  return (
+    <PermissionGate permission="order:create" fallback={<NoAccessCard />}>
+      <BillingForm />
+    </PermissionGate>
   );
 }
