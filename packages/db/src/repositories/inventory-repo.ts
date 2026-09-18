@@ -8,7 +8,6 @@
 
 import {
   type StockLot as DomainStockLot,
-  NotImplementedError,
   type OrgId,
   StockHubError,
   type VariantId,
@@ -17,9 +16,9 @@ import {
   asVariantId,
   satang,
 } from '@stockhub/core';
-import { and, asc, eq, gt, gte, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, gte, ilike, or, sql } from 'drizzle-orm';
 import type { DbExecutor } from '../client';
-import { stockLots, warehouses } from '../schema';
+import { orderLines, orders, products, stockLots, variants, warehouses } from '../schema';
 import type { Warehouse } from '../schema';
 
 export interface LotQuery {
@@ -101,8 +100,11 @@ export interface StockOverviewRow {
   sku: string;
   productName: string;
   variantName: string | null;
+  kind: 'simple' | 'bundle';
   unit: string;
+  sellingPrice: number;
   onHand: number;
+  reserved: number;
   reorderPoint: number;
   /** Cost fields. The API must call stripCost() before sending these to a
    *  role without the 'cost:read' permission. */
@@ -113,29 +115,116 @@ export interface StockOverviewRow {
 /**
  * The main stock screen: one row per variant with quantity and value.
  *
- * TODO(template) implement:
- *   SELECT v.id, v.sku, p.name, v.name, v.unit, v.reorder_point,
- *          coalesce(sum(l.remaining_qty), 0)                   AS on_hand,
- *          coalesce(sum(l.remaining_qty * l.unit_cost), 0)     AS stock_value
- *     FROM variants v
- *     JOIN products p ON p.id = v.product_id
- *     LEFT JOIN stock_lots l
- *       ON l.variant_id = v.id
- *      AND l.remaining_qty > 0
- *      AND (:warehouseId IS NULL OR l.warehouse_id = :warehouseId)
- *    WHERE v.org_id = :orgId AND v.is_active
- *    GROUP BY v.id, p.name
- *    ORDER BY p.name
- *   avg_unit_cost = stock_value / nullif(on_hand, 0)
+ * The page is a keyset page, not an OFFSET page: `after` is the last row the
+ * caller already served, compared as the (product name, variant id) tuple, so
+ * an insert between pages can never shift a row across the page border.
+ * `limit + 1` rows come back so the caller can tell whether a cursor follows.
  *
- * Bundles need a second pass: they own no lots, so their `onHand` is
+ * Bundles own no lots, so their `onHand` is 0 here; the service overlays
  * bundleAvailability(components, onHandByVariant) from @stockhub/core.
  */
 export const getStockOverview = async (
-  _exec: DbExecutor,
-  _params: { orgId: OrgId; warehouseId?: WarehouseId; search?: string },
+  exec: DbExecutor,
+  params: {
+    orgId: OrgId;
+    warehouseId?: WarehouseId;
+    search?: string;
+    after?: { name: string; id: string };
+    limit: number;
+  },
 ): Promise<StockOverviewRow[]> => {
-  throw new NotImplementedError('getStockOverview');
+  // Open FIFO layers only: a fully consumed lot must not feed qty or value.
+  // Both aggregates come out of one pass over the lots.
+  const lotTotals = exec
+    .select({
+      variantId: stockLots.variantId,
+      onHand: sql<number>`sum(${stockLots.remainingQty})::int`.as('on_hand'),
+      // bigint sums can arrive as strings depending on the driver, hence the
+      // Number() mapping below instead of trusting the declared type.
+      stockValue: sql<
+        string | number
+      >`sum(${stockLots.remainingQty} * ${stockLots.unitCost})::bigint`.as('stock_value'),
+    })
+    .from(stockLots)
+    .where(
+      params.warehouseId
+        ? and(
+            eq(stockLots.orgId, params.orgId),
+            eq(stockLots.warehouseId, params.warehouseId),
+            gt(stockLots.remainingQty, 0),
+          )
+        : and(eq(stockLots.orgId, params.orgId), gt(stockLots.remainingQty, 0)),
+    )
+    .groupBy(stockLots.variantId)
+    .as('lot_totals');
+
+  // Confirmed orders hold stock back for a customer even before sale_out runs.
+  const reservedTotals = exec
+    .select({
+      variantId: orderLines.variantId,
+      reserved: sql<number>`sum(${orderLines.qty})::int`.as('reserved'),
+    })
+    .from(orderLines)
+    .innerJoin(orders, eq(orders.id, orderLines.orderId))
+    .where(and(eq(orderLines.orgId, params.orgId), eq(orders.status, 'confirmed')))
+    .groupBy(orderLines.variantId)
+    .as('reserved_totals');
+
+  const rows = await exec
+    .select({
+      variantId: variants.id,
+      sku: variants.sku,
+      productName: products.name,
+      variantName: variants.name,
+      kind: variants.kind,
+      unit: variants.unit,
+      sellingPrice: variants.sellingPrice,
+      onHand: lotTotals.onHand,
+      reserved: reservedTotals.reserved,
+      reorderPoint: variants.reorderPoint,
+      stockValue: lotTotals.stockValue,
+    })
+    .from(variants)
+    .innerJoin(products, eq(products.id, variants.productId))
+    .leftJoin(lotTotals, eq(lotTotals.variantId, variants.id))
+    .leftJoin(reservedTotals, eq(reservedTotals.variantId, variants.id))
+    .where(
+      and(
+        eq(variants.orgId, params.orgId),
+        eq(variants.isActive, true),
+        params.search
+          ? or(
+              ilike(variants.sku, `%${params.search}%`),
+              ilike(products.name, `%${params.search}%`),
+              ilike(variants.name, `%${params.search}%`),
+            )
+          : undefined,
+        params.after
+          ? sql`(${products.name}, ${variants.id}) > (${params.after.name}, ${params.after.id})`
+          : undefined,
+      ),
+    )
+    .orderBy(asc(products.name), asc(variants.id))
+    .limit(params.limit + 1);
+
+  return rows.map((row) => {
+    const onHand = row.onHand ?? 0;
+    const stockValue = Number(row.stockValue ?? 0);
+    return {
+      variantId: asVariantId(row.variantId),
+      sku: row.sku,
+      productName: row.productName,
+      variantName: row.variantName,
+      kind: row.kind,
+      unit: row.unit,
+      sellingPrice: row.sellingPrice,
+      onHand,
+      reserved: row.reserved ?? 0,
+      reorderPoint: row.reorderPoint,
+      stockValue,
+      avgUnitCost: onHand === 0 ? 0 : Math.round(stockValue / onHand),
+    };
+  });
 };
 
 /**

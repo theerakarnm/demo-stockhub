@@ -16,7 +16,7 @@ import {
   asStockLotId,
   satang,
 } from '@stockhub/core';
-import { and, asc, desc, eq, gte, inArray, lte } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import type { DbExecutor } from '../client';
 import { movementLotConsumptions, products, stockLots, stockMovements, variants } from '../schema';
 import { applyLotDeltas } from './inventory-repo';
@@ -125,8 +125,10 @@ export interface HistoryQuery {
   reason?: MovementReason;
   from?: Date;
   to?: Date;
+  /** Keyset cursor: the last row the caller already served, so pages never
+   *  repeat or skip a movement when two share an occurred_at. Replaces offset. */
+  before?: { at: Date; id: string };
   limit?: number;
-  offset?: number;
 }
 
 export interface HistoryRow {
@@ -142,45 +144,101 @@ export interface HistoryRow {
   note: string | null;
   orderId: string | null;
   channelId: string | null;
+  /** Running balance of the variant right after this movement, computed as
+   *  sum(qty_delta) over the whole ledger of that variant. */
+  qtyAfter: number;
+  /** Where the stock physically moved. */
+  warehouseId: string;
+  /** Who recorded the row, when the actor is known. */
+  createdBy: string | null;
 }
 
 /**
  * Movement history, newest first. Backed by the
  * stock_movements_variant_occurred_idx / _org_occurred_idx indexes.
  *
+ * The running balance must be summed over EVERY movement of the variant, so
+ * the inner select filters only by orgId (+ variantId) and the reason / date
+ * / cursor filters run on the outer select, after the window function has
+ * done its work. Filtering inside the window would silently restart the
+ * balance at the first filtered page.
+ *
+ * Pages are keyset pages: `before` is the last row the caller already served,
+ * compared as the (occurred_at, id) tuple, so a movement written between two
+ * page requests can never shift rows across the border. `offset` would
+ * re-read and re-skip rows on every such write, so it has no place in an
+ * append-only ledger.
+ *
  * Keep the page size bounded: this table grows forever.
  */
 export const listHistory = async (exec: DbExecutor, query: HistoryQuery): Promise<HistoryRow[]> => {
-  const filters = [eq(stockMovements.orgId, query.orgId)];
-  if (query.variantId) filters.push(eq(stockMovements.variantId, query.variantId));
-  if (query.reason) filters.push(eq(stockMovements.reason, query.reason));
-  if (query.from) filters.push(gte(stockMovements.occurredAt, query.from));
-  if (query.to) filters.push(lte(stockMovements.occurredAt, query.to));
-
-  return exec
+  const balances = exec
     .select({
       id: stockMovements.id,
-      occurredAt: stockMovements.occurredAt,
+      variantId: stockMovements.variantId,
+      warehouseId: stockMovements.warehouseId,
       reason: stockMovements.reason,
       qtyDelta: stockMovements.qtyDelta,
       costTotal: stockMovements.costTotal,
-      variantId: stockMovements.variantId,
-      sku: variants.sku,
-      productName: products.name,
-      note: stockMovements.note,
-      orderId: stockMovements.orderId,
       channelId: stockMovements.channelId,
+      orderId: stockMovements.orderId,
+      occurredAt: stockMovements.occurredAt,
+      note: stockMovements.note,
+      createdBy: stockMovements.createdBy,
+      qtyAfter:
+        sql<number>`sum(${stockMovements.qtyDelta}) over (partition by ${stockMovements.variantId} order by ${stockMovements.occurredAt}, ${stockMovements.id})::int`.as(
+          'qty_after',
+        ),
     })
     .from(stockMovements)
-    .innerJoin(variants, eq(variants.id, stockMovements.variantId))
+    .where(
+      query.variantId
+        ? and(eq(stockMovements.orgId, query.orgId), eq(stockMovements.variantId, query.variantId))
+        : eq(stockMovements.orgId, query.orgId),
+    )
+    .as('m');
+
+  return exec
+    .select({
+      id: balances.id,
+      occurredAt: balances.occurredAt,
+      reason: balances.reason,
+      qtyDelta: balances.qtyDelta,
+      costTotal: balances.costTotal,
+      variantId: balances.variantId,
+      sku: variants.sku,
+      productName: products.name,
+      note: balances.note,
+      orderId: balances.orderId,
+      channelId: balances.channelId,
+      qtyAfter: balances.qtyAfter,
+      warehouseId: balances.warehouseId,
+      createdBy: balances.createdBy,
+    })
+    .from(balances)
+    .innerJoin(variants, eq(variants.id, balances.variantId))
     .innerJoin(products, eq(products.id, variants.productId))
-    .where(and(...filters))
-    .orderBy(desc(stockMovements.occurredAt), desc(stockMovements.id))
-    .limit(query.limit ?? 50)
-    .offset(query.offset ?? 0);
+    .where(
+      and(
+        query.reason ? eq(balances.reason, query.reason) : undefined,
+        query.from ? gte(balances.occurredAt, query.from) : undefined,
+        query.to ? lte(balances.occurredAt, query.to) : undefined,
+        query.before
+          ? sql`(${balances.occurredAt}, ${balances.id}) < (${query.before.at}, ${query.before.id})`
+          : undefined,
+      ),
+    )
+    .orderBy(desc(balances.occurredAt), desc(balances.id))
+    .limit(query.limit ?? 50);
 };
 
-export type OrderMovementRow = HistoryRow & { consumptions: LotConsumption[] };
+/**
+ * Deliberately omits `qtyAfter`: the running balance is a property of the
+ * whole variant ledger (see listHistory), while this read path narrows to one
+ * order, where a window sum would only be a meaningless partial balance. The
+ * reversal flow needs the lot slices, not the balance.
+ */
+export type OrderMovementRow = Omit<HistoryRow, 'qtyAfter'> & { consumptions: LotConsumption[] };
 
 /**
  * Every movement caused by one order, oldest first. Used when a marketplace
@@ -205,6 +263,8 @@ export const listMovementsForOrder = async (
       note: stockMovements.note,
       orderId: stockMovements.orderId,
       channelId: stockMovements.channelId,
+      warehouseId: stockMovements.warehouseId,
+      createdBy: stockMovements.createdBy,
     })
     .from(stockMovements)
     .innerJoin(variants, eq(variants.id, stockMovements.variantId))
