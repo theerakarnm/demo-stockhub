@@ -13,10 +13,12 @@
 import { relations } from 'drizzle-orm';
 import { bundleComponents, products, variants } from './catalog';
 import { channelListings, channels } from './channels';
+import { customers } from './customers';
 import { importBatches } from './imports';
 import { movementLotConsumptions, stockLots, stockMovements, warehouses } from './inventory';
 import { orderLines, orders } from './orders';
 import { organizations, users } from './org';
+import { priceTierPrices, priceTiers } from './pricing';
 
 export const organizationsRelations = relations(organizations, ({ many }) => ({
   users: many(users),
@@ -55,6 +57,7 @@ export const variantsRelations = relations(variants, ({ one, many }) => ({
   movements: many(stockMovements),
   listings: many(channelListings),
   orderLines: many(orderLines),
+  tierPrices: many(priceTierPrices),
 }));
 
 export const bundleComponentsRelations = relations(bundleComponents, ({ one }) => ({
@@ -165,6 +168,14 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
     fields: [orders.importBatchId],
     references: [importBatches.id],
   }),
+  customer: one(customers, {
+    fields: [orders.customerId],
+    references: [customers.id],
+  }),
+  priceTier: one(priceTiers, {
+    fields: [orders.priceTierId],
+    references: [priceTiers.id],
+  }),
   lines: many(orderLines),
   movements: many(stockMovements),
 }));
@@ -192,6 +203,30 @@ export const importBatchesRelations = relations(importBatches, ({ one, many }) =
   uploadedByUser: one(users, {
     fields: [importBatches.uploadedBy],
     references: [users.id],
+  }),
+  orders: many(orders),
+}));
+
+export const priceTiersRelations = relations(priceTiers, ({ many }) => ({
+  prices: many(priceTierPrices),
+  customers: many(customers),
+}));
+
+export const priceTierPricesRelations = relations(priceTierPrices, ({ one }) => ({
+  priceTier: one(priceTiers, {
+    fields: [priceTierPrices.priceTierId],
+    references: [priceTiers.id],
+  }),
+  variant: one(variants, {
+    fields: [priceTierPrices.variantId],
+    references: [variants.id],
+  }),
+}));
+
+export const customersRelations = relations(customers, ({ one, many }) => ({
+  priceTier: one(priceTiers, {
+    fields: [customers.priceTierId],
+    references: [priceTiers.id],
   }),
   orders: many(orders),
 }));
