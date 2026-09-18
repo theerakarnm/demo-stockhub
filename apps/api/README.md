@@ -121,6 +121,15 @@ Tier fields (`priceTierId`, `priceTierCode`, `priceTierName`, `tierPrices`, `pri
 | `GET /api/v1/catalog/search?q=&limit=` | `stock:read` | query: `q` 1-120 chars, `limit` 1-50 (default 10) | `CatalogSearchRow[]` |
 | `POST /api/v1/listings` | `import:run` | body: `SaveListingInput` | `SaveListingResult` |
 | `GET /api/v1/listings?channelId=` | `stock:read` | query: `channelId` optional | `ListingView[]` |
+| `GET /api/v1/imports` | `import:run` | none | `ImportBatch[]`, newest first |
+| `POST /api/v1/imports` | `import:run` | multipart `file`, optional `channelId`, `timeZone` | `ImportBatch` (201), status `preview_ready` |
+| `GET /api/v1/imports/:id` | `import:run` | path: batch id | `ImportPreviewResponse` grouped for the preview screen |
+| `POST /api/v1/imports/:id/match` | `import:run` | body: `{ platformSku, variantId }` | `{ linesUpdated, unmatchedRemaining }` |
+| `POST /api/v1/imports/:id/apply` | `import:run` | body: `{ ignoreUnmatched? }`, may be empty | `ApplyImportResult`, `cogs` is a cost field |
+| `GET /api/v1/dashboard/summary` | `stock:read` | none | `DashboardSummary`, `stockValue` is a cost field |
+| `GET /api/v1/reports/channel-sales?days=` | `order:read` | query: `days` 1-365, default 7 | `ChannelSalesRow[]` |
+| `GET /api/v1/reports/variance?days=` | `stock:read` | query: `days` 1-365, default 7 | `VarianceRow[]` |
+| `GET /api/v1/reports/cogs?from=&to=` | `cost:read` | query: `from`, `to` dates, `channelId` optional | `CogsReportRow[]`, 403 without `cost:read` |
 
 ## Error contract
 
