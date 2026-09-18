@@ -18,10 +18,13 @@ import {
   bundleComponents,
   channelListings,
   channels,
+  customers,
   importBatches,
   orderLines,
   orders,
   organizations,
+  priceTierPrices,
+  priceTiers,
   products,
   stockLots,
   stockMovements,
@@ -33,12 +36,15 @@ import {
   SEED_BUNDLE_COMPONENTS,
   SEED_CHANNELS,
   SEED_CHANNEL_LISTINGS,
+  SEED_CUSTOMERS,
   SEED_IDS,
   SEED_IMPORT_BATCHES,
   SEED_OPENING_STOCK,
   SEED_ORDERS,
   SEED_ORDER_LINES,
   SEED_ORG,
+  SEED_PRICE_TIERS,
+  SEED_PRICE_TIER_PRICES,
   SEED_PRODUCTS,
   SEED_USERS,
   SEED_VARIANTS,
@@ -55,6 +61,9 @@ const TABLES_TO_CLEAR = [
   'import_batches',
   'channel_listings',
   'bundle_components',
+  'customers',
+  'price_tier_prices',
+  'price_tiers',
   'variants',
   'products',
   'channels',
@@ -94,6 +103,9 @@ const main = async (): Promise<void> => {
       await tx.insert(channels).values(SEED_CHANNELS);
       await tx.insert(products).values(SEED_PRODUCTS);
       await tx.insert(variants).values(SEED_VARIANTS);
+      await tx.insert(priceTiers).values(SEED_PRICE_TIERS);
+      await tx.insert(priceTierPrices).values(SEED_PRICE_TIER_PRICES);
+      await tx.insert(customers).values(SEED_CUSTOMERS);
       await tx.insert(bundleComponents).values(SEED_BUNDLE_COMPONENTS);
 
       // Opening stock: the purchase_in movement is the event, the lot is the
