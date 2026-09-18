@@ -45,17 +45,38 @@ export const toCustomerView = (row: CustomerRow): CustomerView => ({
   createdAt: row.createdAt.toISOString(),
 });
 
+/**
+ * Client ids are opaque strings on the wire but uuid columns in Postgres, so a
+ * malformed id would otherwise reach SQL and surface as a 500 cast error.
+ * Shape-checking first lets the service answer the same 404/400 it would give
+ * for a well-formed id that simply does not exist.
+ */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** A tier id must reference a tier of the caller's org, or input is wrong. */
 const assertTierInOrg = async (
   ctx: ServiceContext,
   tierId: string | null | undefined,
 ): Promise<void> => {
   if (!tierId) return;
+  if (!UUID_PATTERN.test(tierId)) {
+    throw new StockHubError(
+      'validation_error',
+      `Price tier ${tierId} does not belong to this org`,
+      {
+        priceTierId: tierId,
+      },
+    );
+  }
   const tiers = await pricingRepo.listTiers(ctx.db(), { orgId: ctx.auth.orgId });
   if (!tiers.some((tier) => tier.id === tierId)) {
-    throw new StockHubError('validation_error', `Price tier ${tierId} does not belong to this org`, {
-      priceTierId: tierId,
-    });
+    throw new StockHubError(
+      'validation_error',
+      `Price tier ${tierId} does not belong to this org`,
+      {
+        priceTierId: tierId,
+      },
+    );
   }
 };
 
@@ -71,7 +92,13 @@ export const listCustomers = async (
   return rows.map(toCustomerView);
 };
 
-export const getCustomer = async (ctx: ServiceContext, customerId: string): Promise<CustomerView> => {
+export const getCustomer = async (
+  ctx: ServiceContext,
+  customerId: string,
+): Promise<CustomerView> => {
+  if (!UUID_PATTERN.test(customerId)) {
+    throw new StockHubError('not_found', `Customer ${customerId} not found`, { customerId });
+  }
   const row = await customerRepo.getCustomer(ctx.db(), {
     orgId: ctx.auth.orgId,
     customerId: asCustomerId(customerId),
@@ -114,6 +141,9 @@ export const updateCustomer = async (
   customerId: string,
   input: CustomerInput,
 ): Promise<CustomerView> => {
+  if (!UUID_PATTERN.test(customerId)) {
+    throw new StockHubError('not_found', `Customer ${customerId} not found`, { customerId });
+  }
   await assertTierInOrg(ctx, input.priceTierId);
   // Only the keys the caller sent change; an explicit null clears the column.
   const patch = {
@@ -203,20 +233,36 @@ export const resolvePrices = async (
   exec?: DbExecutor,
 ): Promise<PriceResolutionView[]> => {
   const db = exec ?? ctx.db();
+  // An explicitly requested tier that cannot exist is caller error; a customer
+  // id that cannot exist simply resolves without a tier (the fallback chain).
+  if (input.priceTierId !== undefined && !UUID_PATTERN.test(input.priceTierId)) {
+    throw new StockHubError(
+      'validation_error',
+      `Price tier ${input.priceTierId} does not belong to this org`,
+      { priceTierId: input.priceTierId },
+    );
+  }
   let tierId: PriceTierId | undefined = input.priceTierId;
-  if (tierId === undefined && input.customerId !== undefined) {
+  if (
+    tierId === undefined &&
+    input.customerId !== undefined &&
+    UUID_PATTERN.test(input.customerId)
+  ) {
     const customer = await customerRepo.getCustomer(db, {
       orgId: ctx.auth.orgId,
       customerId: input.customerId,
     });
-    tierId = customer?.priceTierId !== null && customer?.priceTierId !== undefined
-      ? asPriceTierId(customer.priceTierId)
-      : undefined;
+    tierId =
+      customer?.priceTierId !== null && customer?.priceTierId !== undefined
+        ? asPriceTierId(customer.priceTierId)
+        : undefined;
   }
   const defaultTier = await pricingRepo.getDefaultTier(db, { orgId: ctx.auth.orgId });
   const defaultTierId = defaultTier ? asPriceTierId(defaultTier.id) : undefined;
   // One map for both tiers so resolvePrice can fall back entirely in memory.
-  const tierIds = [...new Set([...(tierId ? [tierId] : []), ...(defaultTierId ? [defaultTierId] : [])])];
+  const tierIds = [
+    ...new Set([...(tierId ? [tierId] : []), ...(defaultTierId ? [defaultTierId] : [])]),
+  ];
   const [tierPrices, variantById] = await Promise.all([
     pricingRepo.getTierPriceMap(db, {
       orgId: ctx.auth.orgId,
