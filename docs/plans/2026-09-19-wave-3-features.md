@@ -55,11 +55,11 @@ Owner: child `wave3-track-f`, branch `wave3-track-f`, database `stockhub_f`.
 
 The service stubs in `apps/api/src/services/import-service.ts` already document the exact algorithm in comments. Implement those comments, do not redesign them.
 
-- [ ] F1 Preview storage and migration
+- [x] F1 Preview storage and migration
   - Add `preview` jsonb column to `import_batches` in `packages/db/src/schema/imports.ts`, typed with a payload interface that carries the parsed orders, per-line match results and unmatched groups so `getImportPreview` can rebuild `ImportPreviewResponse` without the file.
   - Run `bun run db:generate` and commit the SQL file.
   - Commit: `Store import preview on the batch`
-- [ ] F2 uploadImport
+- [x] F2 uploadImport
   - Implement steps 1 to 7 from the comment block in `apps/api/src/services/import-service.ts`.
   - Generate the batch id first, build the key with `importObjectKey`, put the bytes to storage before parsing.
   - Detect with `detectAdapter` from `packages/adapters/src/registry.ts`; when detection fails throw `StockHubError('validation_error', ...)`.
@@ -68,18 +68,18 @@ The service stubs in `apps/api/src/services/import-service.ts` already document 
   - Persist status `preview_ready` with the preview payload. Test with fixture files from `packages/adapters/fixtures/` through `apps/api/src/test-utils.ts`.
   - Remove the `// MOCK:` from the list and preview paths in `apps/api/src/routes/imports.ts`; `listImports` becomes the simple query from its comment.
   - Commit: `Implement import upload and preview`
-- [ ] F3 Preview read and manual match
+- [x] F3 Preview read and manual match
   - Implement `getImportPreview` and `saveManualMatch` in the same service.
   - The preview response groups orders for the UI: `willDeduct` (matched, not cancelled, not duplicate), `needsMatch` (grouped unmatched with suggestions), `skipped` (cancelled orders and orders whose `channelId + externalOrderId` already exists in `orders`).
   - `saveManualMatch` writes the `channel_listings` row through the listing repo, re-matches every line in the stored preview that used the SKU, updates the stored preview and `unmatchedCount`, and returns `unmatchedRemaining`.
   - Tests: preview shape for a fixture with one bad SKU, match fixes it, and a second import matches that SKU automatically from `listing_map`.
   - Commit: `Wire import preview and manual match`
-- [ ] F4 applyImport
+- [x] F4 applyImport
   - Implement the eight-step transaction from the `applyImport` comment exactly: re-read the batch `FOR UPDATE`, refuse when unmatched and not ignored, upsert orders idempotently on `(channelId, externalOrderId)`, `expandBundles`, lock affected lots in a consistent order, `planMovements`, insert movements and lot updates, set status `applied`.
   - Marketplace sales use `consumeFifo` with `onShortage: 'shortfall'`. An order already applied earlier that the new file marks cancelled or returned restores with `restoreFifo` on the original consumption.
   - The lifeline tests (AGENTS.md rule 6): importing the same file twice leaves stock unchanged, and a later file that marks a previously applied order as cancelled brings the stock back at the original cost. Write both.
   - Commit: `Implement import apply in one transaction`
-- [ ] F5 Web screens for the pipeline
+- [x] F5 Web screens for the pipeline
   - `apps/web/src/app/imports/new/page.tsx`: real upload with drag and drop, detected channel display, checksum duplicate warning, error state.
   - `apps/web/src/app/imports/page.tsx`: real batch list with status badges.
   - `apps/web/src/app/imports/[id]/page.tsx`: three visible groups from the brief (ตัดได้, ติดปัญหา SKU, ถูกข้าม), inline match flow reusing the variant picker from track C, apply button with a confirm dialog that restates the counts.
