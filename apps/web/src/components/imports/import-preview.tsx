@@ -138,9 +138,10 @@ function NoPreviewState({ detail }: { detail: ImportDetailResponse }) {
   );
 }
 
-/** Thai copy for the two skip reasons the API reports. */
+/** Thai copy for the skip reasons the API reports. */
 const SKIP_REASON_LABEL: Record<PreviewSkippedOrder['reason'], string> = {
   cancelled: 'ออเดอร์ถูกยกเลิกในไฟล์ จะไม่ตัดสต็อก (ถ้าเคยตัดไปแล้ว ระบบจะคืนสต็อกตามต้นทุนเดิม)',
+  returned: 'ลูกค้าคืนสินค้า จะไม่ตัดสต็อก (ถ้าเคยตัดไปแล้ว ระบบจะคืนสต็อกตามต้นทุนเดิม)',
   already_imported: 'ออเดอร์นี้อยู่ในระบบแล้ว จะไม่ตัดสต็อกซ้ำ',
 };
 

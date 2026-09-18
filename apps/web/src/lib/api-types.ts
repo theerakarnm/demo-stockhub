@@ -320,7 +320,7 @@ export interface UnmatchedSku {
 }
 
 /** Why an order the file describes will not move stock on apply. */
-export type PreviewSkipReason = 'cancelled' | 'already_imported';
+export type PreviewSkipReason = 'cancelled' | 'returned' | 'already_imported';
 
 /** One order of the preview's skipped bucket, with the reason it is skipped. */
 export interface PreviewSkippedOrder {

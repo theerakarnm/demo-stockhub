@@ -424,7 +424,9 @@ const groupPreviewOrders = async (
     const hasUnmatched = order.lines.some((line) => line.matchSource === 'unmatched');
     const resting = order.status === 'cancelled' || order.status === 'returned';
     if (resting) {
-      skipped.push({ order, reason: 'cancelled' });
+      // A returned order is not a cancellation: the label must say so, or the
+      // seller thinks the platform cancelled when the buyer sent it back.
+      skipped.push({ order, reason: order.status === 'returned' ? 'returned' : 'cancelled' });
       continue;
     }
     if (existingByExternal.has(order.externalOrderId)) {
