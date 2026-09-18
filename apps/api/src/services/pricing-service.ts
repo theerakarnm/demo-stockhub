@@ -12,9 +12,33 @@
  * the full shape and never needs to know the caller.
  */
 
-import { type CustomerId, type OrgId, StockHubError, asCustomerId } from '@stockhub/core';
-import { type Customer, type PriceTier, customerRepo, pricingRepo } from '@stockhub/db';
-import type { CustomerInput, CustomerView } from '../types/contract-pricing';
+import {
+  type CustomerId,
+  type OrgId,
+  type PriceTierId,
+  type Satang,
+  StockHubError,
+  type VariantId,
+  asCustomerId,
+  asPriceTierId,
+  asVariantId,
+  resolvePrice,
+  satang,
+} from '@stockhub/core';
+import {
+  type Customer,
+  type DbExecutor,
+  type PriceTier,
+  catalogRepo,
+  customerRepo,
+  pricingRepo,
+} from '@stockhub/db';
+import type {
+  CustomerInput,
+  CustomerView,
+  PriceMatrixRow,
+  PriceResolutionView,
+} from '../types/contract-pricing';
 import type { ServiceContext } from './context';
 
 /** Repo row (already tier-joined) -> wire shape. Nulls collapse off the wire. */
@@ -124,4 +148,119 @@ export const updateCustomer = async (
 export const listTiers = async (ctx: ServiceContext) => {
   const tiers = await pricingRepo.listTiers(ctx.db(), { orgId: ctx.auth.orgId });
   return tiers.map(toTierView);
+};
+
+/** Repo matrix row -> wire shape. The sparse `prices` map keeps its name change. */
+export const toMatrixView = (row: pricingRepo.PriceMatrixRow): PriceMatrixRow => {
+  // Flatten the partial branded record to a plain object; absent cells stay absent.
+  const tierPrices: Record<string, number> = {};
+  for (const [tierId, price] of Object.entries(row.prices)) {
+    if (price !== undefined) tierPrices[tierId] = price;
+  }
+  return {
+    variantId: row.variantId,
+    sku: row.sku,
+    name: row.name,
+    sellingPrice: row.sellingPrice,
+    tierPrices,
+  };
+};
+
+export const getMatrix = async (ctx: ServiceContext): Promise<PriceMatrixRow[]> => {
+  const rows = await pricingRepo.listMatrix(ctx.db(), { orgId: ctx.auth.orgId });
+  return rows.map(toMatrixView);
+};
+
+export interface PutTierPricesResult {
+  upserted: number;
+  deleted: number;
+}
+
+export const putTierPrices = async (
+  ctx: ServiceContext,
+  priceTierId: string,
+  cells: readonly { variantId: string; price: number | null }[],
+): Promise<PutTierPricesResult> => {
+  const exec = ctx.db();
+  // Same tenant rule as the customer's tier: only a tier OF THIS ORG is writable.
+  await requireTierOfOrg(exec, ctx.auth.orgId, priceTierId);
+  return pricingRepo.upsertTierPrices(exec, {
+    orgId: ctx.auth.orgId,
+    priceTierId: asPriceTierId(priceTierId),
+    prices: cells.map((cell) => ({
+      variantId: asVariantId(cell.variantId),
+      price: cell.price as Satang | null,
+    })),
+  });
+};
+
+export interface ResolvePricesInput {
+  variantIds: readonly string[];
+  customerId?: string;
+  priceTierId?: string;
+}
+
+/**
+ * What price every requested variant should use for this customer or tier.
+ *
+ * `exec` defaults to the request's db handle; the bill flow (P1) passes its
+ * own transaction so a bill and its prices are read in one consistent state.
+ */
+export const resolvePrices = async (
+  ctx: ServiceContext,
+  input: ResolvePricesInput,
+  exec?: DbExecutor,
+): Promise<PriceResolutionView[]> => {
+  const db = exec ?? ctx.db();
+  const orgId = ctx.auth.orgId;
+
+  // The explicit tier wins; otherwise the customer's own tier. A customer from
+  // another org (or an unknown id) is 404, not a silent fallback.
+  let tierId: PriceTierId | undefined;
+  if (input.priceTierId) {
+    tierId = asPriceTierId(input.priceTierId);
+  } else if (input.customerId) {
+    const customer = await customerRepo.getCustomer(db, {
+      orgId,
+      customerId: asCustomerId(input.customerId),
+    });
+    if (!customer) {
+      throw new StockHubError('not_found', 'ไม่พบลูกค้า', { customerId: input.customerId });
+    }
+    tierId = customer.priceTierId ? asPriceTierId(customer.priceTierId) : undefined;
+  }
+
+  const defaultTier = await pricingRepo.getDefaultTier(db, { orgId });
+  const defaultTierId = defaultTier ? asPriceTierId(defaultTier.id) : undefined;
+
+  // One query for BOTH tiers' cells; resolvePrice() does the fallback in memory.
+  const tierIds = [...new Set([tierId, defaultTierId].filter((id) => id !== undefined))];
+  const [tierPrices, variantById] = await Promise.all([
+    pricingRepo.getTierPriceMap(db, {
+      orgId,
+      tierIds,
+      variantIds: input.variantIds.map(asVariantId),
+    }),
+    catalogRepo.getVariantsByIds(db, { orgId, variantIds: input.variantIds.map(asVariantId) }),
+  ]);
+
+  return input.variantIds.map((variantId) => {
+    const variant = variantById.get(asVariantId(variantId));
+    if (!variant) {
+      throw new StockHubError('not_found', 'ไม่พบสินค้า', { variantId });
+    }
+    const resolution = resolvePrice({
+      variantId: asVariantId(variantId),
+      sellingPrice: satang(variant.sellingPrice),
+      tierId,
+      defaultTierId,
+      tierPrices,
+    });
+    return {
+      variantId: resolution.variantId,
+      price: resolution.price,
+      priceSource: resolution.source,
+      ...(resolution.tierId ? { priceTierId: resolution.tierId } : {}),
+    };
+  });
 };

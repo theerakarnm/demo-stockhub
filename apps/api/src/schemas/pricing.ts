@@ -25,3 +25,34 @@ export const listCustomersQuery = z.object({
   q: z.string().trim().min(1).max(80).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
+
+export const tierParam = z.object({ id: idString });
+
+/** One save on the matrix screen writes the whole edited row of one tier. */
+export const putTierPricesBody = z.object({
+  prices: z
+    .array(
+      z.object({
+        variantId: idString,
+        // null deletes the cell so the variant falls back to the standard price.
+        price: z.number().int().nonnegative().nullable(),
+      }),
+    )
+    .min(1)
+    .max(500),
+});
+
+/** GET /pricing/resolve?variantIds=a,b,c&customerId=... or &priceTierId=... */
+export const resolveQuery = z.object({
+  variantIds: z
+    .string()
+    .min(1)
+    .transform((value) =>
+      value
+        .split(',')
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0),
+    ),
+  customerId: idString.optional(),
+  priceTierId: idString.optional(),
+});
