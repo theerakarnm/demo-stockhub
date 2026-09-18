@@ -29,3 +29,23 @@ export const listCustomersQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
 });
 export type ListCustomersQuery = z.infer<typeof listCustomersQuery>;
+
+export const putTierPricesBody = z.object({
+  prices: z
+    .array(z.object({ variantId: idString, price: z.number().int().nonnegative().nullable() }))
+    .min(1)
+    .max(500),
+});
+export type PutTierPricesBody = z.infer<typeof putTierPricesBody>;
+
+// `variantIds` arrives as one comma separated query value, so it is split and
+// trimmed here; the pipe still enforces the id shape and the 1..200 bound.
+export const resolveQuery = z.object({
+  variantIds: z
+    .string()
+    .transform((s) => s.split(',').map((v) => v.trim()).filter(Boolean))
+    .pipe(z.array(idString).min(1).max(200)),
+  customerId: idString.optional(),
+  priceTierId: idString.optional(),
+});
+export type ResolveQuery = z.infer<typeof resolveQuery>;
