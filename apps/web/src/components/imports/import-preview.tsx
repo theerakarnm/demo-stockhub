@@ -10,7 +10,7 @@
  * match and apply.
  */
 
-import { ChannelBadge, ImportStatusBadge } from '@/components/domain-badges';
+import { ChannelBadge, ImportStatusBadge, OrderStatusBadge } from '@/components/domain-badges';
 import { ApplyResultPanel } from '@/components/imports/apply-result-panel';
 import { ParseIssuesList } from '@/components/imports/parse-issues-list';
 import { PreviewOrdersTable } from '@/components/imports/preview-orders-table';
@@ -23,13 +23,20 @@ import {
   CardHeader,
   Dialog,
   EmptyState,
+  Table,
+  TableWrap,
+  Tbody,
+  Td,
+  Th,
+  Thead,
+  Tr,
   buttonClass,
 } from '@/components/ui';
 import { api } from '@/lib/api-client';
 import type { ApiError } from '@/lib/api-error';
-import type { ApplyImportResult, ImportDetailResponse } from '@/lib/api-types';
+import type { ApplyImportResult, ImportDetailResponse, PreviewSkippedOrder } from '@/lib/api-types';
 import { cn } from '@/lib/cn';
-import { formatDateTime, qty } from '@/lib/format';
+import { baht, formatDateTime, qty } from '@/lib/format';
 import { useMutation } from '@/lib/use-api';
 import { AlertTriangle, CheckCircle2, ClipboardList, PackageCheck } from 'lucide-react';
 import Link from 'next/link';
@@ -102,7 +109,7 @@ function NoPreviewState({ detail }: { detail: ImportDetailResponse }) {
               <p className="mt-1 text-xs text-slate-600">
                 บันทึกเมื่อ {batch.appliedAt ? formatDateTime(batch.appliedAt) : 'ไม่ทราบเวลา'} จำนวน{' '}
                 {qty(batch.ordersParsed)} ออเดอร์ และ {qty(batch.linesParsed)} รายการสินค้า
-                ตัวอย่างข้อมูลจะถูกล้างหลังบันทึก เพื่อให้ข้อมูลจริงอยู่ที่หน้าออเดอร์และความเคลื่อนไหวสต็อก
+                ข้อมูลจริงอยู่ที่หน้าออเดอร์และความเคลื่อนไหวสต็อก
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Link href="/movements" className={buttonClass('primary', 'sm')}>
@@ -128,6 +135,46 @@ function NoPreviewState({ detail }: { detail: ImportDetailResponse }) {
         icon={<ClipboardList className="size-5" aria-hidden />}
       />
     </Card>
+  );
+}
+
+/** Thai copy for the two skip reasons the API reports. */
+const SKIP_REASON_LABEL: Record<PreviewSkippedOrder['reason'], string> = {
+  cancelled: 'ออเดอร์ถูกยกเลิกในไฟล์ จะไม่ตัดสต็อก (ถ้าเคยตัดไปแล้ว ระบบจะคืนสต็อกตามต้นทุนเดิม)',
+  already_imported: 'ออเดอร์นี้อยู่ในระบบแล้ว จะไม่ตัดสต็อกซ้ำ',
+};
+
+/** The ถูกข้าม bucket: orders the applier will not touch, each with a reason. */
+function SkippedOrdersTable({ skipped }: { skipped: PreviewSkippedOrder[] }) {
+  return (
+    <TableWrap>
+      <Table>
+        <Thead>
+          <Tr>
+            <Th>เลขที่ออเดอร์</Th>
+            <Th>สถานะในไฟล์</Th>
+            <Th numeric>รายการ</Th>
+            <Th numeric>ยอดรวม</Th>
+            <Th>เหตุผลที่ข้าม</Th>
+          </Tr>
+        </Thead>
+        <Tbody>
+          {skipped.map(({ order, reason }) => (
+            <Tr key={order.externalOrderId}>
+              <Td className="font-mono text-xs text-slate-900">{order.externalOrderId}</Td>
+              <Td>
+                <OrderStatusBadge status={order.status} />
+              </Td>
+              <Td numeric>{qty(order.lines.length)}</Td>
+              <Td numeric className="font-medium text-slate-900">
+                {baht(order.grandTotal)}
+              </Td>
+              <Td className="text-xs text-slate-600">{SKIP_REASON_LABEL[reason]}</Td>
+            </Tr>
+          ))}
+        </Tbody>
+      </Table>
+    </TableWrap>
   );
 }
 
@@ -159,15 +206,19 @@ export function ImportPreview({ detail, onReload }: ImportPreviewProps) {
   );
   const apply = useMutation<void, ApplyImportResult>(() => api.applyImport(batch.id));
 
+  // Only a batch waiting for confirmation offers match / apply. Applied and
+  // failed batches fall through to their own status cards below.
+  if (batch.status !== 'preview_ready') return <NoPreviewState detail={detail} />;
   const hasPreview = orders.length > 0 || issues.length > 0 || unmatched.length > 0;
   if (!hasPreview) return <NoPreviewState detail={detail} />;
 
+  const { willDeduct, needsMatch, skipped } = detail.groups;
   const lineCount = orders.reduce((sum, order) => sum + order.lines.length, 0);
+  const deductLines = willDeduct.reduce((sum, order) => sum + order.lines.length, 0);
   const unmatchedLines = orders.reduce(
     (sum, order) => sum + order.lines.filter((line) => line.matchSource === 'unmatched').length,
     0,
   );
-  const matchedLines = lineCount - unmatchedLines;
   const canRun = hasPermission('import:run');
   const blocked = unmatched.length > 0;
 
@@ -197,16 +248,16 @@ export function ImportPreview({ detail, onReload }: ImportPreviewProps) {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <SummaryStat label="ออเดอร์ทั้งหมด" value={orders.length} />
         <SummaryStat label="รายการสินค้า" value={lineCount} />
-        <SummaryStat label="จับคู่แล้ว" value={matchedLines} tone="good" />
+        <SummaryStat label="จะตัดสต็อก" value={willDeduct.length} tone="good" />
         <SummaryStat
           label="ยังไม่จับคู่"
           value={unmatchedLines}
           tone={unmatchedLines > 0 ? 'bad' : 'good'}
         />
         <SummaryStat
-          label="ปัญหาในไฟล์"
-          value={issues.length}
-          tone={issues.length > 0 ? 'warn' : 'neutral'}
+          label="ถูกข้าม / ปัญหา"
+          value={skipped.length + issues.length}
+          tone={skipped.length + issues.length > 0 ? 'warn' : 'neutral'}
         />
       </div>
 
@@ -227,8 +278,8 @@ export function ImportPreview({ detail, onReload }: ImportPreviewProps) {
 
       <Card>
         <CardHeader
-          title="ออเดอร์ที่จะนำเข้า"
-          description="กดที่แถวเพื่อดูรายการสินค้าในออเดอร์นั้นและสินค้าในระบบที่จับคู่ไว้"
+          title="ตัดได้ - ออเดอร์ที่จะตัดสต็อกเมื่อยืนยัน"
+          description="ทุกรายการจับคู่สินค้าแล้ว กดที่แถวเพื่อดูสินค้าในระบบที่จับคู่ไว้"
           action={
             batch.channelKind ? (
               <ChannelBadge kind={batch.channelKind} label={batch.channelName} />
@@ -237,15 +288,35 @@ export function ImportPreview({ detail, onReload }: ImportPreviewProps) {
             ) : null
           }
         />
-        {orders.length === 0 ? (
+        {willDeduct.length === 0 ? (
           <EmptyState
-            title="ไม่พบออเดอร์ในไฟล์นี้"
-            description="ระบบอ่านไฟล์ได้ แต่ไม่พบแถวออเดอร์ที่ใช้ได้ ลองตรวจว่าเลือกไฟล์ถูกไฟล์หรือไม่"
+            title="ไม่มีออเดอร์ที่จะตัดสต็อก"
+            description="ออเดอร์ที่จะเข้าระบบจะปรากฏที่นี่เมื่อจับคู่ SKU ครบทุกรายการ"
           />
         ) : (
-          <PreviewOrdersTable orders={orders} />
+          <PreviewOrdersTable orders={willDeduct} />
         )}
       </Card>
+
+      {needsMatch.length > 0 ? (
+        <Card>
+          <CardHeader
+            title="ติดปัญหา SKU - รอการจับคู่"
+            description="ออเดอร์กลุ่มนี้จะย้ายขึ้นไปที่ ตัดได้ เมื่อจับคู่ SKU ครบทุกรายการ"
+          />
+          <PreviewOrdersTable orders={needsMatch} />
+        </Card>
+      ) : null}
+
+      {skipped.length > 0 ? (
+        <Card>
+          <CardHeader
+            title="ถูกข้าม - จะไม่ตัดสต็อก"
+            description="ออเดอร์ที่ถูกยกเลิกในไฟล์ หรือเคยนำเข้าแล้ว ระบบข้ามเพื่อไม่ให้ตัดสต็อกซ้ำ"
+          />
+          <SkippedOrdersTable skipped={skipped} />
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader
@@ -260,7 +331,8 @@ export function ImportPreview({ detail, onReload }: ImportPreviewProps) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-sm text-slate-700">
-              จะสร้างความเคลื่อนไหวสต็อก {qty(lineCount)} รายการ จาก {qty(orders.length)} ออเดอร์
+              ตัดได้ {qty(willDeduct.length)} ออเดอร์ ({qty(deductLines)} รายการ)
+              {skipped.length > 0 ? <> / ข้าม {qty(skipped.length)} ออเดอร์</> : null}
             </p>
             <p className="text-xs text-slate-500">
               <ImportStatusBadge status={batch.status} />{' '}
@@ -307,9 +379,12 @@ export function ImportPreview({ detail, onReload }: ImportPreviewProps) {
       >
         <div className="space-y-2 text-sm text-slate-700">
           <p>
-            ระบบจะบันทึก {qty(orders.length)} ออเดอร์ และตัดสต็อกรวม {qty(lineCount)} รายการ
+            ระบบจะตัดสต็อก {qty(willDeduct.length)} ออเดอร์ รวม {qty(deductLines)} รายการ
             จากคลังกลางด้วยวิธีต้นทุนแบบเข้าก่อนออกก่อน (FIFO)
           </p>
+          {skipped.length > 0 ? (
+            <p>ข้าม {qty(skipped.length)} ออเดอร์ที่ถูกยกเลิกหรือเคยนำเข้าแล้ว - กลุ่มนี้จะไม่ถูกตัดสต็อก</p>
+          ) : null}
           <p className="text-xs text-slate-500">
             ถ้าอัปโหลดไฟล์เดิมซ้ำ ระบบจะไม่ตัดสต็อกซ้ำ เพราะใช้เลขที่ออเดอร์ของแพลตฟอร์มเป็นตัวกันซ้ำ
           </p>
