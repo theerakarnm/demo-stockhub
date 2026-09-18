@@ -1228,9 +1228,7 @@ const WHOLESALE_VARIANTS = [
 const DEALER_VARIANTS = ['hoe', 'spade', 'machete', 'mower', 'fert50', 'sprayer'] as const;
 
 export const SEED_PRICE_TIER_PRICES: NewPriceTierPrice[] = [
-  ...WHOLESALE_VARIANTS.map((variant) =>
-    tierPriceRow(variant, SEED_IDS.priceTiers.wholesale, 0.9),
-  ),
+  ...WHOLESALE_VARIANTS.map((variant) => tierPriceRow(variant, SEED_IDS.priceTiers.wholesale, 0.9)),
   ...DEALER_VARIANTS.map((variant) => tierPriceRow(variant, SEED_IDS.priceTiers.dealer, 0.82)),
 ];
 

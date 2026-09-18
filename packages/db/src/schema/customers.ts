@@ -9,8 +9,8 @@
 
 import { boolean, index, pgTable, text, uuid } from 'drizzle-orm/pg-core';
 import { primaryId, timestamps } from './_shared';
-import { priceTiers } from './pricing';
 import { orgIdColumn } from './org';
+import { priceTiers } from './pricing';
 
 export const customers = pgTable(
   'customers',

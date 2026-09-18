@@ -9,8 +9,8 @@
  * skips, so `bun test` stays green on a fresh clone with no database running.
  */
 
-import { eq } from 'drizzle-orm';
 import { afterAll, describe, expect, test } from 'bun:test';
+import { eq } from 'drizzle-orm';
 import { createDb } from '../client';
 import { customers, priceTierPrices, priceTiers } from '../schema';
 import { SEED_IDS } from './data';
@@ -46,7 +46,10 @@ describe.skipIf(!db)('seed price tiers and customers', () => {
 
   test('dealerNorth is on the dealer tier', async () => {
     if (!db) return;
-    const rows = await db.select().from(customers).where(eq(customers.id, SEED_IDS.customers.dealerNorth));
+    const rows = await db
+      .select()
+      .from(customers)
+      .where(eq(customers.id, SEED_IDS.customers.dealerNorth));
     expect(rows.length).toBe(1);
     expect(rows[0]?.priceTierId).toBe(SEED_IDS.priceTiers.dealer);
   });

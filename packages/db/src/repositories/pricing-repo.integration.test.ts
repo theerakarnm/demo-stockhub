@@ -13,8 +13,15 @@
  */
 
 import { afterAll, describe, expect, test } from 'bun:test';
-import { type Satang, asCustomerId, asOrgId, asPriceTierId, asVariantId, fromBaht } from '@stockhub/core';
-import { createDb, type DbExecutor } from '../client';
+import {
+  type Satang,
+  asCustomerId,
+  asOrgId,
+  asPriceTierId,
+  asVariantId,
+  fromBaht,
+} from '@stockhub/core';
+import { type DbExecutor, createDb } from '../client';
 import { SEED_IDS } from '../seed/data';
 import { customerRepo, pricingRepo } from './index';
 
@@ -32,15 +39,16 @@ class Rollback extends Error {}
 
 const inRollbackTx = async (fn: (tx: DbExecutor) => Promise<void>): Promise<void> => {
   if (!db) return;
-  await db.transaction(async (tx) => {
-    try {
+  await db
+    .transaction(async (tx) => {
       await fn(tx);
-    } finally {
+      // Reaching here means fn succeeded; this marker error rolls the whole
+      // transaction back so the seeded demo data stays untouched.
       throw new Rollback();
-    }
-  }).catch((error: unknown) => {
-    if (!(error instanceof Rollback)) throw error;
-  });
+    })
+    .catch((error: unknown) => {
+      if (!(error instanceof Rollback)) throw error;
+    });
 };
 
 describe.skipIf(!db)('pricing and customer repositories', () => {
@@ -57,7 +65,11 @@ describe.skipIf(!db)('pricing and customer repositories', () => {
 
   test('getTierPriceMap finds the wholesale hoe cell at 167.00', async () => {
     if (!db) return;
-    const map = await pricingRepo.getTierPriceMap(db, { orgId, tierIds: [wholesale], variantIds: [hoe] });
+    const map = await pricingRepo.getTierPriceMap(db, {
+      orgId,
+      tierIds: [wholesale],
+      variantIds: [hoe],
+    });
     expect(map.get(`${wholesale}::${hoe}`)).toBe(fromBaht(167));
   });
 

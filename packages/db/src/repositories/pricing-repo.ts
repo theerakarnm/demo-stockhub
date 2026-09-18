@@ -8,7 +8,13 @@
  * resolvePrice(), not with extra round trips.
  */
 
-import { type OrgId, type PriceTierId, type Satang, type VariantId, tierPriceKey } from '@stockhub/core';
+import {
+  type OrgId,
+  type PriceTierId,
+  type Satang,
+  type VariantId,
+  tierPriceKey,
+} from '@stockhub/core';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import type { DbExecutor } from '../client';
 import { type PriceTier, priceTierPrices, priceTiers, products, variants } from '../schema';
@@ -51,7 +57,10 @@ export const getTierPriceMap = async (
 ): Promise<Map<string, Satang>> => {
   const map = new Map<string, Satang>();
   if (params.tierIds.length === 0) return map;
-  const filters = [eq(priceTierPrices.orgId, params.orgId), inArray(priceTierPrices.priceTierId, [...params.tierIds])];
+  const filters = [
+    eq(priceTierPrices.orgId, params.orgId),
+    inArray(priceTierPrices.priceTierId, [...params.tierIds]),
+  ];
   if (params.variantIds && params.variantIds.length > 0) {
     filters.push(inArray(priceTierPrices.variantId, [...params.variantIds]));
   }
@@ -64,7 +73,10 @@ export const getTierPriceMap = async (
     .from(priceTierPrices)
     .where(and(...filters));
   for (const row of rows) {
-    map.set(tierPriceKey(row.priceTierId as PriceTierId, row.variantId as VariantId), row.price as Satang);
+    map.set(
+      tierPriceKey(row.priceTierId as PriceTierId, row.variantId as VariantId),
+      row.price as Satang,
+    );
   }
   return map;
 };
@@ -121,7 +133,10 @@ export const upsertTierPrices = async (
         and(
           eq(priceTierPrices.orgId, params.orgId),
           eq(priceTierPrices.priceTierId, params.priceTierId),
-          inArray(priceTierPrices.variantId, toDelete.map((cell) => cell.variantId)),
+          inArray(
+            priceTierPrices.variantId,
+            toDelete.map((cell) => cell.variantId),
+          ),
         ),
       )
       .returning({ id: priceTierPrices.id });
