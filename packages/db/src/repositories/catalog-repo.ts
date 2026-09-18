@@ -18,7 +18,7 @@ import {
   listingKey,
   normaliseSku,
 } from '@stockhub/core';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, getTableColumns, ilike, inArray, or } from 'drizzle-orm';
 import type { DbExecutor } from '../client';
 import { type Variant, bundleComponents, channelListings, products, variants } from '../schema';
 
@@ -167,4 +167,78 @@ export const buildMatchIndex = async (
  */
 export const upsertProduct = async (_exec: DbExecutor, _input: unknown): Promise<never> => {
   throw new NotImplementedError('upsertProduct');
+};
+
+/**
+ * Variant lookups joined with the product display name.
+ *
+ * Tracks A (order creation) and C (import preview) both need the variant row
+ * plus its product's name. Keeping the projection here means neither track
+ * re-joins by hand and every caller sees the same shape.
+ */
+export type VariantWithProduct = Variant & { productName: string };
+
+const variantWithProduct = { ...getTableColumns(variants), productName: products.name };
+
+export const getVariantById = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId; variantId: VariantId },
+): Promise<VariantWithProduct | undefined> => {
+  const [row] = await exec
+    .select(variantWithProduct)
+    .from(variants)
+    .innerJoin(products, eq(products.id, variants.productId))
+    .where(and(eq(variants.orgId, params.orgId), eq(variants.id, params.variantId)))
+    .limit(1);
+  return row;
+};
+
+export const getVariantsByIds = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId; variantIds: readonly VariantId[] },
+): Promise<Map<VariantId, VariantWithProduct>> => {
+  const map = new Map<VariantId, VariantWithProduct>();
+  // inArray with an empty list is invalid SQL, so answer before querying.
+  if (params.variantIds.length === 0) return map;
+  const rows = await exec
+    .select(variantWithProduct)
+    .from(variants)
+    .innerJoin(products, eq(products.id, variants.productId))
+    .where(and(eq(variants.orgId, params.orgId), inArray(variants.id, [...params.variantIds])));
+  for (const row of rows) map.set(asVariantId(row.id), row);
+  return map;
+};
+
+/**
+ * Free-text search over the catalogue, e.g. the SKU picker on the order screen.
+ * Same projection as listCatalog, narrowed by an `ilike` on the SKU, the product
+ * name or the variant label, so the picker renders rows identically.
+ */
+export const searchCatalog = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId; q: string; limit: number },
+): Promise<CatalogRow[]> => {
+  const needle = `%${params.q.trim()}%`;
+  return exec
+    .select({
+      variantId: variants.id,
+      sku: variants.sku,
+      productName: products.name,
+      variantName: variants.name,
+      kind: variants.kind,
+      unit: variants.unit,
+      sellingPrice: variants.sellingPrice,
+      reorderPoint: variants.reorderPoint,
+    })
+    .from(variants)
+    .innerJoin(products, eq(products.id, variants.productId))
+    .where(
+      and(
+        eq(variants.orgId, params.orgId),
+        eq(variants.isActive, true),
+        or(ilike(variants.sku, needle), ilike(products.name, needle), ilike(variants.name, needle)),
+      ),
+    )
+    .orderBy(asc(variants.sku))
+    .limit(params.limit);
 };
