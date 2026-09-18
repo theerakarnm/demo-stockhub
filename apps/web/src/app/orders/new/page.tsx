@@ -114,7 +114,8 @@ export default function NewOrderPage() {
   const submit = useCallback(() => {
     void createOrder.run({
       channelKind,
-      customerName: customerName.trim() || customer?.name || undefined,
+      customerName: customerName.trim() || undefined,
+      customerId: customer?.id,
       note: note.trim() || undefined,
       lines: lines.map((line) => ({
         variantId: line.variantId,

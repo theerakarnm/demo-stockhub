@@ -14,6 +14,7 @@ import {
   type BundleComponent,
   StockHubError,
   asChannelId,
+  asCustomerId,
   asOrderId,
   asVariantId,
   asWarehouseId,
@@ -40,6 +41,7 @@ import {
   type NewOrderLine,
   catalogRepo,
   channelRepo,
+  customerRepo,
   inventoryRepo,
   movementRepo,
   orderRepo,
@@ -49,6 +51,7 @@ import type { CreateOrderBody, ListOrdersQuery } from '../schemas/orders';
 import type { Movement, Order, OrderLine, Page } from '../types/contract';
 import type { ServiceContext } from './context';
 import { toMovementView } from './inventory-service';
+import { resolvePrices } from './pricing-service';
 
 /** Display name shared by the list and the detail screen, as in inventory-service. */
 const displayName = (productName: string, variantName: string | null): string =>
@@ -114,7 +117,10 @@ const toWireOrder = (
   channelId: order.channelId,
   channelKind,
   status: order.status,
+  customerId: order.customerId ?? undefined,
   customerName: order.buyerName ?? undefined,
+  // Tier evidence for the bill; stripped for roles without price_tier:read.
+  priceTierId: order.priceTierId ?? undefined,
   grandTotal: order.grandTotal,
   orderedAt: order.orderedAt.toISOString(),
   lines: [...lines],
@@ -283,7 +289,8 @@ export const getOrder = async (ctx: ServiceContext, orderId: OrderId): Promise<O
  *
  * Transaction outline:
  *   1. resolve the org's active channel for body.channelKind ('pos' | 'wholesale')
- *   2. load variants; default a missing unitPrice to the variant selling price
+ *   2. load the requested customer; price every line: an explicit price wins,
+ *      else the customer's tier price, else the variant selling price
  *   3. expandBundles(lines, componentsByBundle) - a bundle owns no stock
  *   4. lock the open lots of every expanded variant in variant id order
  *      (one global lock order, so concurrent bills queue without deadlocking)
@@ -308,6 +315,30 @@ export const createPosOrder = async (ctx: ServiceContext, body: CreateOrderBody)
       orgId,
       variantIds: body.lines.map((line) => asVariantId(line.variantId)),
     });
+    const customer = body.customerId
+      ? await customerRepo.getCustomer(tx, { orgId, customerId: asCustomerId(body.customerId) })
+      : undefined;
+    if (body.customerId && !customer) {
+      throw new StockHubError('not_found', 'ไม่พบลูกค้า', { customerId: body.customerId });
+    }
+    // Lines without an explicit price take the customer's tier price (or the
+    // fallbacks resolvePrice documents). Resolving inside this transaction
+    // keeps the bill's prices from reading a tier that changes mid-bill.
+    const unpriced = body.lines
+      .filter((line) => line.unitPrice === undefined)
+      .map((line) => asVariantId(line.variantId));
+    const resolved =
+      unpriced.length === 0
+        ? []
+        : await resolvePrices(
+            ctx,
+            {
+              variantIds: unpriced,
+              customerId: customer ? asCustomerId(customer.id) : undefined,
+            },
+            tx,
+          );
+    const priceOf = new Map(resolved.map((r) => [r.variantId, r.price]));
     const pricedLines = body.lines.map((line) => {
       const variant = variantById.get(asVariantId(line.variantId));
       if (!variant) {
@@ -315,8 +346,9 @@ export const createPosOrder = async (ctx: ServiceContext, body: CreateOrderBody)
           variantId: line.variantId,
         });
       }
-      const unitPrice =
-        line.unitPrice === undefined ? variant.sellingPrice : satang(line.unitPrice);
+      const unitPrice = satang(
+        line.unitPrice ?? priceOf.get(asVariantId(line.variantId)) ?? variant.sellingPrice,
+      );
       const discount = satang(line.discount);
       const lineTotal = unitPrice * line.quantity - discount;
       if (lineTotal < 0) {
@@ -369,7 +401,9 @@ export const createPosOrder = async (ctx: ServiceContext, body: CreateOrderBody)
       status: 'shipped',
       orderedAt: now,
       shippedAt: now,
-      buyerName: body.customerName,
+      buyerName: body.customerName ?? customer?.name,
+      customerId: customer?.id,
+      priceTierId: customer?.priceTierId,
       grandTotal,
       raw: body.note === undefined ? { source: 'pos' } : { source: 'pos', note: body.note },
     });

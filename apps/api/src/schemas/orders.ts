@@ -26,6 +26,8 @@ const orderLineBody = z.object({
  */
 export const createOrderBody = z.object({
   channelKind: z.enum(['pos', 'wholesale']),
+  /** Links the bill to a wholesale customer; its tier prices unpriced lines. */
+  customerId: idString.optional(),
   customerName: z.string().trim().max(160).optional(),
   note: z.string().trim().max(280).optional(),
   lines: z.array(orderLineBody).min(1).max(200),

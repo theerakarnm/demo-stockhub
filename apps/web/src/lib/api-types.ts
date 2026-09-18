@@ -403,6 +403,8 @@ export type OrdersResponse = Paginated<Order>;
 /** POST /api/v1/orders - manual bill, POS counter or wholesale. */
 export interface CreateOrderInput {
   channelKind: 'pos' | 'wholesale';
+  /** Links the bill to a wholesale customer; its tier prices unpriced lines. */
+  customerId?: string;
   customerName?: string;
   note?: string;
   lines: Array<{

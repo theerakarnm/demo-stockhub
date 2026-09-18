@@ -47,9 +47,18 @@ interface OrderWire {
   id: string;
   status: string;
   grandTotal: number;
+  customerId?: string;
+  customerName?: string;
+  priceTierId?: string;
   cogs?: number;
   margin?: number;
-  lines: { id: string; variantId: string; quantity: number; totalCost?: number }[];
+  lines: {
+    id: string;
+    variantId: string;
+    quantity: number;
+    unitPrice?: number;
+    totalCost?: number;
+  }[];
 }
 
 /** The Movement wire shape this suite asserts on. */
@@ -254,5 +263,36 @@ describe.skipIf(!url)('order routes (seeded database)', () => {
     expect(adjustOut[0]?.qtyDelta).toBe(-1);
     const bill = await jsonAs<OrderWire>(app, `/api/v1/orders/${gloveBillId}`, 'manager');
     expect(bill.status).toBe('returned');
+  });
+
+  test('a dealer customer bill stores the tier price, the customer and the tier', async () => {
+    const res = await post(app, '/api/v1/orders', 'sales', {
+      channelKind: 'pos',
+      customerId: SEED_IDS.customers.dealerNorth,
+      lines: [{ variantId: SEED_IDS.variants.hoe, quantity: 1 }],
+    });
+    expect(res.status).toBe(201);
+    const bill = (await res.json()) as OrderWire;
+    // HOE-001 sells at 185.00; the dealer tier is 185 * 0.82 rounded to 152.00.
+    expect(bill.lines[0]?.unitPrice).toBe(15_200);
+    expect(bill.grandTotal).toBe(15_200);
+    expect(bill.customerName).toBe('ตัวแทนภาคเหนือ');
+    // sales holds price_tier:read in the merged rbac, so its response keeps
+    // the tier id; stock_staff is the role the tier is stripped from.
+    expect(bill.priceTierId).toBe(SEED_IDS.priceTiers.dealer);
+    // The same bill as owner carries the tier evidence too.
+    const asOwner = await jsonAs<OrderWire>(app, `/api/v1/orders/${bill.id}`, 'owner');
+    expect(asOwner.priceTierId).toBe(SEED_IDS.priceTiers.dealer);
+    const asStockStaff = await jsonAs<OrderWire>(app, `/api/v1/orders/${bill.id}`, 'stock_staff');
+    expect('priceTierId' in asStockStaff).toBe(false);
+    // A customer id outside the org is a 404, not a 500.
+    const missing = await post(app, '/api/v1/orders', 'sales', {
+      channelKind: 'pos',
+      customerId: '99999999-9999-9999-9999-999999999999',
+      lines: [{ variantId: SEED_IDS.variants.hoe, quantity: 1 }],
+    });
+    expect(missing.status).toBe(404);
+    const body = (await missing.json()) as ErrorWire;
+    expect(body.error.code).toBe('not_found');
   });
 });

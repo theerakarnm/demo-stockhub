@@ -192,7 +192,11 @@ export interface Order {
   channelId: string;
   channelKind: ChannelKind;
   status: OrderStatus;
+  /** Wholesale customer the bill was sold to, when it has one. */
+  customerId?: string;
   customerName?: string;
+  /** tier field */
+  priceTierId?: string;
   grandTotal: MoneyOnWire;
   /** cost field */
   cogs?: MoneyOnWire;
