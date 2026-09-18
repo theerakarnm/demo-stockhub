@@ -10,15 +10,17 @@ import {
   type StockLot as DomainStockLot,
   NotImplementedError,
   type OrgId,
+  StockHubError,
   type VariantId,
   type WarehouseId,
   asStockLotId,
   asVariantId,
   satang,
 } from '@stockhub/core';
-import { and, asc, eq, gt, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, gte, sql } from 'drizzle-orm';
 import type { DbExecutor } from '../client';
-import { stockLots } from '../schema';
+import { stockLots, warehouses } from '../schema';
+import type { Warehouse } from '../schema';
 
 export interface LotQuery {
   orgId: OrgId;
@@ -139,20 +141,57 @@ export const getStockOverview = async (
 /**
  * Write the lot deltas produced by consumeFifo / restoreFifo.
  *
- * TODO(template) implement as one UPDATE per lot inside the caller's
- * transaction:
- *   UPDATE stock_lots
- *      SET remaining_qty = remaining_qty - :qty, updated_at = now()
- *    WHERE id = :lotId AND remaining_qty >= :qty
- * Check the affected row count. A 0 there means somebody consumed the lot
- * between the SELECT FOR UPDATE and this write, which must abort the
- * transaction instead of producing a negative quantity.
+ * Every delta is one guarded UPDATE: the WHERE clause re-checks the quantity
+ * the caller saw when it locked the lot, so a lost lock can only abort the
+ * transaction, never drive `remaining_qty` below 0 or above the received qty.
+ * A 0-row UPDATE throws `conflict` because somebody consumed the lot between
+ * the SELECT FOR UPDATE and this write.
  *
  * Pass a negative `qty` to restore (return / cancel).
  */
 export const applyLotDeltas = async (
-  _exec: DbExecutor,
-  _deltas: readonly { lotId: string; qty: number }[],
+  exec: DbExecutor,
+  deltas: readonly { lotId: string; qty: number }[],
 ): Promise<void> => {
-  throw new NotImplementedError('applyLotDeltas');
+  for (const delta of deltas) {
+    if (delta.qty === 0) continue;
+    // consuming: enough left; restoring: never above what was received
+    const guard =
+      delta.qty > 0
+        ? gte(stockLots.remainingQty, delta.qty)
+        : sql`${stockLots.remainingQty} - ${delta.qty} <= ${stockLots.qty}`;
+    const updated = await exec
+      .update(stockLots)
+      .set({ remainingQty: sql`${stockLots.remainingQty} - ${delta.qty}` })
+      .where(and(eq(stockLots.id, delta.lotId), guard))
+      .returning({ id: stockLots.id });
+    if (updated.length === 0) {
+      throw new StockHubError('conflict', `Lot ${delta.lotId} changed between lock and write`, {
+        lotId: delta.lotId,
+        qty: delta.qty,
+      });
+    }
+  }
+};
+
+/**
+ * The warehouse marketplace imports feed when the caller did not pick one.
+ * Exactly one warehouse per org carries `is_default`; if the org has none the
+ * caller cannot proceed, so this throws `not_found` instead of returning null.
+ */
+export const getDefaultWarehouse = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId },
+): Promise<Warehouse> => {
+  const [row] = await exec
+    .select()
+    .from(warehouses)
+    .where(and(eq(warehouses.orgId, params.orgId), eq(warehouses.isDefault, true)))
+    .limit(1);
+  if (!row) {
+    throw new StockHubError('not_found', `Org ${params.orgId} has no default warehouse`, {
+      orgId: params.orgId,
+    });
+  }
+  return row;
 };
