@@ -1,19 +1,12 @@
 /**
- * Headless state for the inline variant picker (a combobox).
+ * Pure state machine for the variant picker's open listbox.
  *
- * Kept out of the component so the keyboard behaviour - wrap-around highlight,
- * reset on typing, query survives closing - is testable with plain `bun test`,
- * no DOM needed.
+ * Kept free of React on purpose: the keyboard behaviour (wrap-around
+ * highlighting, reset on typing, query preserved on close) is the kind of
+ * logic that is cheapest to prove with plain unit tests.
  */
 
-export interface PickerState {
-  /** The suggestion/result list is rendered. */
-  open: boolean;
-  /** Index into the combined suggestion + result list. */
-  highlighted: number;
-  /** What the user has typed; kept on close so reopening can refine it. */
-  query: string;
-}
+export type PickerState = { open: boolean; highlighted: number; query: string };
 
 export type PickerAction =
   | { type: 'type'; query: string }
@@ -21,26 +14,22 @@ export type PickerAction =
   | { type: 'open' }
   | { type: 'close' };
 
-export const pickerInitialState: PickerState = { open: false, highlighted: 0, query: '' };
-
 export const pickerReducer = (state: PickerState, action: PickerAction): PickerState => {
   switch (action.type) {
     case 'type':
-      // Typing reopens the list and puts the highlight back on the first row,
-      // so Enter after a pause always picks the best-ranked row.
+      // Typing reopens the list and always restarts the highlight at the top.
       return { open: true, highlighted: 0, query: action.query };
     case 'move': {
+      // Nothing to move through yet: keep the state exactly as it is.
       if (action.count === 0) return state;
       const next = state.highlighted + action.delta;
-      // Wrap around instead of stopping: the list is short and arrow keys
-      // should always answer, whichever end the user is at.
-      const wrapped = next < 0 ? action.count - 1 : next >= action.count ? 0 : next;
-      return { ...state, open: true, highlighted: wrapped };
+      const wrapped = next < 0 ? action.count - 1 : next % action.count;
+      return { ...state, highlighted: wrapped };
     }
     case 'open':
       return { ...state, open: true };
     case 'close':
-      // Escape must not wipe the query: the user usually reopens and refines.
+      // Closing must not wipe what the user typed; the query drives the search.
       return { ...state, open: false };
   }
 };

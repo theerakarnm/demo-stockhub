@@ -1,10 +1,11 @@
 /**
- * Listing routes - the learned platform-SKU mappings behind automatic matching.
+ * Listing write routes - the learned platform-SKU mappings.
  *
- * Routes:
- *   POST /    save a mapping (import:run); re-matches this channel's still
- *             unmatched order lines in the same transaction
- *   GET /     list mappings (stock:read), optionally for one channel
+ * POST /          save a human match decision (import:run, the import preview's role)
+ * GET /           list the learned mappings of the org, optionally per channel
+ *
+ * The POST is idempotent (upsert on channel + platform SKU), so it answers
+ * 200 rather than 201: it is a save, not a fresh resource creation.
  */
 
 import { Hono } from 'hono';
@@ -17,15 +18,9 @@ import { listListings, saveListing } from '../services/matching-service';
 import type { AppEnv } from '../types/app';
 
 export const listingsRouter = new Hono<AppEnv>()
-  .post(
-    '/',
-    // Saving a mapping is a write to the import pipeline, not to stock, so it
-    // is gated like the rest of the import flow.
-    requirePermission('import:run'),
-    validate('json', saveListingBody),
-    async (c) => ok(c, await saveListing(serviceContext(c), c.req.valid('json')), 201),
+  .post('/', requirePermission('import:run'), validate('json', saveListingBody), async (c) =>
+    ok(c, await saveListing(serviceContext(c), c.req.valid('json'))),
   )
-  .get('/', requirePermission('stock:read'), validate('query', listListingsQuery), async (c) => {
-    const { channelId } = c.req.valid('query');
-    return ok(c, await listListings(serviceContext(c), channelId));
-  });
+  .get('/', requirePermission('stock:read'), validate('query', listListingsQuery), async (c) =>
+    ok(c, await listListings(serviceContext(c), c.req.valid('query'))),
+  );

@@ -1,16 +1,15 @@
 /**
- * Catalog search + listing writes.
+ * Catalog search and learned-listing writes.
  *
- * Both jobs are pure orchestration: SQL lives in @stockhub/db repositories and
- * the matching rules in @stockhub/core. saving a listing is the preview
- * screen's "จับคู่" button: it persists the mapping AND re-matches the open
- * order lines in ONE transaction, so the preview and the learned mapping can
- * never disagree.
+ * The search is the SKU picker's backend; the listing write is what the import
+ * preview calls when a human resolves an unmatched line. Both are pure
+ * orchestration: SQL in @stockhub/db repositories, matching rules in
+ * @stockhub/core.
  */
 
 import { StockHubError, asChannelId, asVariantId } from '@stockhub/core';
-import type { VariantId } from '@stockhub/core';
 import { catalogRepo, channelRepo, inventoryRepo, listingRepo } from '@stockhub/db';
+import type { ListListingsQuery } from '../schemas/catalog';
 import type {
   CatalogSearchRow,
   ListingView,
@@ -19,18 +18,11 @@ import type {
 } from '../types/contract-catalog';
 import type { ServiceContext } from './context';
 
-/** Display name shared with the inventory service, so pickers read the same. */
+/** Display name shared with the inventory rows, so pickers render identically. */
 const displayName = (productName: string, variantName: string | null): string =>
   variantName ? `${productName} (${variantName})` : productName;
 
-/**
- * GET /catalog/search handler.
- *
- * The text match (catalogRepo.searchCatalog) and the live on-hand map
- * (inventoryRepo.getOnHandByVariant) are two reads on purpose: the search
- * stays a plain indexed ilike, and every picker row gets truthful stock from
- * the same source the inventory screen uses.
- */
+/** Free-text catalog search with on-hand quantity overlaid from the stock pool. */
 export const searchCatalog = async (
   ctx: ServiceContext,
   q: string,
@@ -38,10 +30,12 @@ export const searchCatalog = async (
 ): Promise<CatalogSearchRow[]> => {
   const exec = ctx.db();
   const orgId = ctx.auth.orgId;
+
   const [rows, onHandByVariant] = await Promise.all([
     catalogRepo.searchCatalog(exec, { orgId, q, limit }),
     inventoryRepo.getOnHandByVariant(exec, { orgId }),
   ]);
+
   return rows.map((row) => ({
     variantId: row.variantId,
     sku: row.sku,
@@ -54,40 +48,42 @@ export const searchCatalog = async (
 };
 
 /**
- * POST /listings handler.
+ * Remember a human SKU decision and back-fill the open order lines.
  *
- * One transaction: the channel_listings row and the re-matched order lines
- * land together or not at all. A half-saved listing would make the next import
- * match by itself while the current preview still shows the line as unmatched.
+ * One transaction on purpose: if the rematch fails, the learned listing must
+ * not survive either, or the next import would match lines nobody approved.
+ * Returns the rematch count so the preview screen can show what changed.
  */
 export const saveListing = async (
   ctx: ServiceContext,
   input: SaveListingInput,
-): Promise<SaveListingResult> =>
-  ctx.db().transaction(async (tx): Promise<SaveListingResult> => {
-    const orgId = ctx.auth.orgId;
+): Promise<SaveListingResult> => {
+  const db = ctx.db();
+  const orgId = ctx.auth.orgId;
+  const variantId = asVariantId(input.variantId);
+  const channelId = asChannelId(input.channelId);
 
-    // The variant must belong to this org: a guessed id from another tenant is
-    // a 404, never a cross-org write.
-    const variantId = asVariantId(input.variantId);
-    const variant = await catalogRepo.getVariantById(tx, { orgId, variantId });
-    if (!variant) {
-      throw new StockHubError('not_found', `Variant ${input.variantId} not found`, {
-        variantId: input.variantId,
-      });
-    }
+  const variant = await catalogRepo.getVariantById(db, { orgId, variantId });
+  if (!variant) {
+    throw new StockHubError('not_found', `Variant ${input.variantId} not found`, {
+      variantId: input.variantId,
+    });
+  }
 
-    const channels = await channelRepo.listChannels(tx, { orgId });
-    const channel = channels.find((ch) => ch.id === input.channelId);
-    if (!channel) {
-      throw new StockHubError('not_found', `Channel ${input.channelId} not found`, {
-        channelId: input.channelId,
-      });
-    }
+  // The channel must belong to the same org - a listing keyed to another
+  // tenant's channel would be invisible to the matcher and silently useless.
+  const channels = await channelRepo.listChannels(db, { orgId });
+  const channel = channels.find((row) => row.id === input.channelId);
+  if (!channel) {
+    throw new StockHubError('not_found', `Channel ${input.channelId} not found`, {
+      channelId: input.channelId,
+    });
+  }
 
+  return db.transaction(async (tx) => {
     const listing = await listingRepo.upsertListing(tx, {
       orgId,
-      channelId: asChannelId(channel.id),
+      channelId,
       platformSku: input.platformSku,
       platformProductName: input.platformProductName,
       variantId,
@@ -95,44 +91,42 @@ export const saveListing = async (
     });
     const linesUpdated = await listingRepo.rematchOpenLines(tx, {
       orgId,
-      channelId: asChannelId(channel.id),
+      channelId,
       platformSku: input.platformSku,
       variantId,
     });
     return {
       listingId: listing.id,
-      channelId: listing.channelId,
+      channelId,
       platformSku: listing.platformSku,
-      variantId: variant.id,
+      variantId,
       linesUpdated,
     };
   });
+};
 
-/**
- * GET /listings handler.
- *
- * The repository returns raw channel_listings rows; the variant SKU is joined
- * here in one extra batched read so the screen can show "LZD-NEW-HAT-XL ->
- * HAT-01" without N+1 lookups.
- */
+/** The learned mappings of the org, resolved to variant SKUs for display. */
 export const listListings = async (
   ctx: ServiceContext,
-  channelId?: string,
+  query: ListListingsQuery,
 ): Promise<ListingView[]> => {
   const exec = ctx.db();
   const orgId = ctx.auth.orgId;
-  const listings = await listingRepo.listListings(exec, {
+
+  const rows = await listingRepo.listListings(exec, {
     orgId,
-    channelId: channelId ? asChannelId(channelId) : undefined,
+    channelId: query.channelId ? asChannelId(query.channelId) : undefined,
+  });
+  // null variantId is the 'ignore this SKU' marker; it has no SKU to show.
+  const variantsById = await catalogRepo.getVariantsByIds(exec, {
+    orgId,
+    variantIds: rows
+      .map((row) => row.variantId)
+      .filter((id): id is NonNullable<typeof id> => id !== null)
+      .map((id) => asVariantId(id)),
   });
 
-  const variantIds: VariantId[] = [];
-  for (const row of listings) {
-    if (row.variantId) variantIds.push(asVariantId(row.variantId));
-  }
-  const variantsById = await catalogRepo.getVariantsByIds(exec, { orgId, variantIds });
-
-  return listings.map((row) => ({
+  return rows.map((row) => ({
     id: row.id,
     channelId: row.channelId,
     platformSku: row.platformSku,

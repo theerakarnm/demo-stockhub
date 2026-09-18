@@ -9,10 +9,8 @@
  *                         and the choice is saved as a listing_map row so the
  *                         next import matches automatically.
  *
- * When the outcome is `unmatched` the result still carries ranked
- * `suggestions`: first every variant sharing the normalised form (score 1,
- * because one of them is almost certainly the right one), then the best
- * Dice-coefficient neighbours, so the user usually only clicks once.
+ * The unmatched step never guesses: when normalisation is ambiguous or misses,
+ * the matcher hands back a ranked suggestion list and the user decides.
  */
 
 import type { MatchSource } from '../../domain/enums';
@@ -22,7 +20,7 @@ export interface MatchCandidate {
   variantId: VariantId;
   sku: string;
   name: string;
-  /** 0-1 similarity to the platform SKU this candidate was suggested for. */
+  /** Similarity to the platform SKU being matched, 0 (nothing) to 1 (identical). */
   score?: number;
 }
 
@@ -51,6 +49,7 @@ export const normaliseSku = (sku: string): string =>
 export const listingKey = (channelId: ChannelId, platformSku: string): string =>
   `${channelId}::${normaliseSku(platformSku)}`;
 
+/** Adjacent character pairs of the normalised SKU - the unit of Dice similarity. */
 const bigrams = (s: string): Set<string> => {
   const n = normaliseSku(s);
   const out = new Set<string>();
@@ -59,11 +58,11 @@ const bigrams = (s: string): Set<string> => {
 };
 
 /**
- * 0-1 similarity between two SKUs.
+ * Pure similarity between two SKUs, 0 to 1.
  *
- *   1    identical after normalisation
- *   0.8  one normalised form contains the other (same product, suffix noise)
- *   else Dice coefficient over character bigrams (0-1, order sensitive)
+ * Identity first, then a cheap substring shortcut for the common
+ * 'LZD-SPR16' vs 'SPR-16L' shape, then a Dice coefficient over bigrams so
+ * typos and prefixes still rank high.
  */
 export const skuSimilarity = (a: string, b: string): number => {
   const na = normaliseSku(a);
@@ -75,10 +74,14 @@ export const skuSimilarity = (a: string, b: string): number => {
   if (ba.size === 0 || bb.size === 0) return 0;
   let shared = 0;
   for (const g of ba) if (bb.has(g)) shared++;
-  return (2 * shared) / (ba.size + bb.size); // Dice coefficient
+  return (2 * shared) / (ba.size + bb.size);
 };
 
-/** Fallback list for the preview screen: rank every variant, keep the plausible ones. */
+/**
+ * Ranked candidates for a platform SKU that no listing or SKU rule matched.
+ * Name hits count at 0.6 weight because sellers reword product names freely.
+ * The 0.3 floor keeps the suggestion list short and honest.
+ */
 export const suggestCandidates = (
   platformSku: string,
   index: MatchIndex,
@@ -87,7 +90,6 @@ export const suggestCandidates = (
   [...index.bySku.values()]
     .map((c) => ({
       ...c,
-      // Name similarity is damped: a shared word must not outrank a real SKU overlap.
       score: Math.max(skuSimilarity(platformSku, c.sku), skuSimilarity(platformSku, c.name) * 0.6),
     }))
     .filter((c) => (c.score ?? 0) >= 0.3)
@@ -101,13 +103,15 @@ export const matchSku = (
 ): MatchResult => {
   const listed = index.listingMap.get(listingKey(channelId, platformSku));
   if (listed) return { variantId: listed, source: 'listing_map', suggestions: [] };
+
   const exact = index.bySku.get(platformSku.trim());
   if (exact) return { variantId: exact.variantId, source: 'sku_exact', suggestions: [] };
+
   const normalised = index.byNormalisedSku.get(normaliseSku(platformSku)) ?? [];
   const only = normalised[0];
-  if (normalised.length === 1 && only) {
+  if (normalised.length === 1 && only)
     return { variantId: only.variantId, source: 'sku_normalised', suggestions: [] };
-  }
+
   // Zero or ambiguous normalised hits: never guess, hand the user a ranked list.
   return {
     source: 'unmatched',

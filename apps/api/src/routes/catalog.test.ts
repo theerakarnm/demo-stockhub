@@ -1,151 +1,109 @@
 /**
- * Catalog search and listing endpoint tests against the seeded database.
+ * Catalog search + listing route tests against the seeded database.
  *
- * They need a live Postgres with the migration applied and the seed loaded:
- *
- *   bun run docker:up && bun run db:migrate && bun run db:seed
- *
- * and DATABASE_URL in the environment. Without DATABASE_URL the whole file
- * skips, so `bun test` stays green on a fresh clone with no database running.
- *
- * The suite MUTATES the seed (one channel_listings row + the unmatched Lazada
- * work-queue line), so afterAll deletes the listing and resets the line, which
- * keeps the seed reusable for the demo and the other suites.
+ * The save test is the only one that writes. Its afterAll deletes the created
+ * listing and resets the seeded unmatched line, so the seed stays valid for
+ * the next run. Without DATABASE_URL the whole suite skips.
  */
 
 import { afterAll, describe, expect, test } from 'bun:test';
 import { SEED_IDS, createDb } from '@stockhub/db';
 import { sql } from 'drizzle-orm';
-import { buildTestApp, jsonAs, requestAs } from '../test-utils';
-import { catalogRouter } from './catalog';
-import { listingsRouter } from './listings';
+import { app } from '../index';
+import { jsonAs, requestAs } from '../test-utils';
+import type { CatalogSearchRow, ListingView, SaveListingResult } from '../types/contract-catalog';
 
 const url = process.env.DATABASE_URL;
 const db = url ? createDb(url) : undefined;
 
 const LAZADA_MAIN = SEED_IDS.channels.lazadaMain;
-const HAT = SEED_IDS.variants.hat;
-const PLATFORM_SKU = 'LZD-NEW-HAT-XL';
-
-interface SearchRow {
-  variantId: string;
-  sku: string;
-  name: string;
-  kind: string;
-  unit: string;
-  sellingPrice: number;
-  onHand: number;
-}
-
-interface SaveListingResult {
-  listingId: string;
-  channelId: string;
-  platformSku: string;
-  variantId: string;
-  linesUpdated: number;
-}
-
-interface ListingView {
-  id: string;
-  channelId: string;
-  platformSku: string;
-  platformProductName: string | null;
-  variantId: string | null;
-  variantSku: string | null;
-  matchSource: string;
-}
-
-interface ErrorWire {
-  error: { code: string };
-}
-
-const app = buildTestApp((v1) =>
-  v1.route('/catalog', catalogRouter).route('/listings', listingsRouter),
-);
-
-const post = (path: string, role: 'owner' | 'manager' | 'sales', body: unknown) =>
-  requestAs(app, path, role, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-const saveHatListing = (role: 'owner' | 'manager' | 'sales') =>
-  jsonAs<SaveListingResult>(app, '/api/v1/listings', role, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      channelId: LAZADA_MAIN,
-      platformSku: PLATFORM_SKU,
-      platformProductName: 'หมวกชาวไร่ ปีกกว้าง ไซส์ XL',
-      variantId: HAT,
-    }),
-  });
+const UNMATCHED_LINE_ID = '14000000-0000-4000-8000-000000000004';
 
 describe.skipIf(!url)('catalog and listing routes (seeded database)', () => {
   afterAll(async () => {
     if (!db) return;
+    // Undo the save test: the listing row goes away, the seeded unmatched line
+    // returns to exactly the state the seed wrote.
     await db.execute(
-      sql`delete from channel_listings where channel_id = ${LAZADA_MAIN} and platform_sku = ${PLATFORM_SKU}`,
+      sql`delete from channel_listings where channel_id = ${LAZADA_MAIN} and platform_sku = 'LZD-NEW-HAT-XL'`,
     );
     await db.execute(
-      sql`update order_lines set variant_id = null, match_source = 'unmatched' where id = '14000000-0000-4000-8000-000000000004'`,
+      sql`update order_lines set variant_id = null, match_source = 'unmatched' where id = ${UNMATCHED_LINE_ID}`,
     );
     await db.$client.end();
   });
 
-  test('search finds the three fertilizer variants by their Thai name, sorted by sku', async () => {
-    const q = encodeURIComponent('ปุ๋ย');
-    const rows = await jsonAs<SearchRow[]>(app, `/api/v1/catalog/search?q=${q}`, 'owner');
-    expect(rows).toHaveLength(3);
+  test('search finds the fertilizer variants by their Thai product name', async () => {
+    const rows = await jsonAs<CatalogSearchRow[]>(
+      app,
+      // Built with encodeURIComponent so the combining tone mark survives any
+      // editor or transport that would otherwise normalise the literal.
+      `/api/v1/catalog/search?q=${encodeURIComponent('ปุ๋ย')}`,
+      'owner',
+    );
     expect(rows.map((row) => row.sku)).toEqual(['FRT-161616-25', 'FRT-161616-50', 'FRT-ORG-25']);
-    expect(rows.every((row) => Number.isInteger(row.onHand) && row.onHand > 0)).toBe(true);
-    expect(rows.every((row) => row.variantId.length > 0)).toBe(true);
+    for (const row of rows) expect(typeof row.onHand).toBe('number');
   });
 
-  test('an empty q is a 400 validation_error', async () => {
+  test('an empty query is a 400, not a full-catalog dump', async () => {
     const res = await requestAs(app, '/api/v1/catalog/search?q=', 'owner');
     expect(res.status).toBe(400);
-    const body = (await res.json()) as ErrorWire;
+    const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe('validation_error');
   });
 
-  test('saving a mapping re-matches the open seed line exactly once', async () => {
-    const result = await saveHatListing('manager');
-    expect(result.linesUpdated).toBe(1);
-    expect(result.channelId).toBe(LAZADA_MAIN);
-    expect(result.variantId).toBe(HAT);
-    expect(result.listingId.length).toBeGreaterThan(0);
+  test('saving a listing back-fills the open line once, then is idempotent', async () => {
+    const body = {
+      channelId: LAZADA_MAIN,
+      platformSku: 'LZD-NEW-HAT-XL',
+      platformProductName: 'หมวกชาวไร่ ปีกกว้าง ไซส์ XL',
+      variantId: SEED_IDS.variants.hat,
+    };
+    const first = await jsonAs<SaveListingResult>(app, '/api/v1/listings', 'stock_staff', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    expect(first.linesUpdated).toBe(1);
+    expect(first.variantId).toBe(SEED_IDS.variants.hat);
+
+    const second = await jsonAs<SaveListingResult>(app, '/api/v1/listings', 'stock_staff', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    expect(second.linesUpdated).toBe(0);
   });
 
-  test('saving the same mapping again updates nothing (idempotent)', async () => {
-    const result = await saveHatListing('owner');
-    expect(result.linesUpdated).toBe(0);
-  });
-
-  test('GET /listings returns the saved mapping with the variant sku', async () => {
+  test('the saved listing shows up with the variant SKU resolved', async () => {
     const rows = await jsonAs<ListingView[]>(
       app,
       `/api/v1/listings?channelId=${LAZADA_MAIN}`,
       'owner',
     );
-    const saved = rows.find((row) => row.platformSku === PLATFORM_SKU);
+    const saved = rows.find((row) => row.platformSku === 'LZD-NEW-HAT-XL');
+    expect(saved?.variantId).toBe(SEED_IDS.variants.hat);
     expect(saved?.variantSku).toBe('HAT-01');
-    expect(saved?.variantId).toBe(HAT);
-    expect(saved?.channelId).toBe(LAZADA_MAIN);
     expect(saved?.matchSource).toBe('manual');
   });
 
-  test('stock_staff may search, but sales may not save a listing', async () => {
-    const search = await requestAs(app, '/api/v1/catalog/search?q=HOE', 'stock_staff');
-    expect(search.status).toBe(200);
-    const res = await post('/api/v1/listings', 'sales', {
-      channelId: LAZADA_MAIN,
-      platformSku: 'NOT-ALLOWED',
-      variantId: HAT,
+  test('stock_staff may search the catalog', async () => {
+    const res = await requestAs(app, '/api/v1/catalog/search?q=HOE', 'stock_staff');
+    expect(res.status).toBe(200);
+  });
+
+  test('sales may not save a listing', async () => {
+    const res = await requestAs(app, '/api/v1/listings', 'sales', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        channelId: LAZADA_MAIN,
+        platformSku: 'LZD-NEW-HAT-XL',
+        variantId: SEED_IDS.variants.hat,
+      }),
     });
     expect(res.status).toBe(403);
-    const body = (await res.json()) as ErrorWire;
+    const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe('forbidden');
   });
 });

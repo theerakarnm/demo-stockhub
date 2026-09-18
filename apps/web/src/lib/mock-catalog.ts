@@ -1,15 +1,16 @@
-// MOCK: ---------------------------------------------------------------------
-// MOCK: Demo fixtures for the catalog picker, imitating GET /catalog/search
-// MOCK: and POST /listings faithfully on purpose. The SKUs, names, units,
-// MOCK: prices and on-hand numbers mirror the seed in packages/db, so the demo
-// MOCK: and a live database tell the same story.
-// MOCK: ---------------------------------------------------------------------
+/**
+ * Demo fixtures for the catalog picker and the listing save.
+ *
+ * The rows imitate the seeded catalog (same SKUs and Thai product names), so
+ * the demo picker behaves like the real backend. This is demo-only data: the
+ * live path of api-catalog.ts never touches this file.
+ */
 
 import type { CatalogSearchRow, SaveListingInput, SaveListingResult } from './api-types-catalog';
 
 export const MOCK_CATALOG: CatalogSearchRow[] = [
   {
-    variantId: 'var_hoe',
+    variantId: '0f000000-0000-4000-8000-000000000001',
     sku: 'HOE-001',
     name: 'จอบขุดดิน ด้ามไม้',
     kind: 'simple',
@@ -18,25 +19,34 @@ export const MOCK_CATALOG: CatalogSearchRow[] = [
     onHand: 100,
   },
   {
-    variantId: 'var_hose',
+    variantId: '0f000000-0000-4000-8000-000000000002',
+    sku: 'SPD-001',
+    name: 'เสียมปลายแหลม',
+    kind: 'simple',
+    unit: 'ด้าม',
+    sellingPrice: 16500,
+    onHand: 80,
+  },
+  {
+    variantId: '0f000000-0000-4000-8000-000000000007',
     sku: 'HOS-20M',
     name: 'สายยางรดน้ำ 5 หุน ยาว 20 เมตร',
     kind: 'simple',
     unit: 'ม้วน',
     sellingPrice: 45000,
-    onHand: 60,
+    onHand: 59,
   },
   {
-    variantId: 'var_sprayer',
+    variantId: '0f000000-0000-4000-8000-000000000013',
     sku: 'SPR-16L',
     name: 'ถังพ่นยาสะพายหลัง 16 ลิตร',
     kind: 'simple',
-    unit: 'ใบ',
-    sellingPrice: 89000,
+    unit: 'ตัว',
+    sellingPrice: 129000,
     onHand: 32,
   },
   {
-    variantId: 'var_glove',
+    variantId: '0f000000-0000-4000-8000-000000000014',
     sku: 'GLV-01',
     name: 'ถุงมือทำสวนเคลือบยาง',
     kind: 'simple',
@@ -45,7 +55,7 @@ export const MOCK_CATALOG: CatalogSearchRow[] = [
     onHand: 700,
   },
   {
-    variantId: 'var_fert50',
+    variantId: '0f000000-0000-4000-8000-000000000010',
     sku: 'FRT-161616-50',
     name: 'ปุ๋ยเคมี สูตร 16-16-16 (ขนาด 50 กก.)',
     kind: 'simple',
@@ -53,44 +63,24 @@ export const MOCK_CATALOG: CatalogSearchRow[] = [
     sellingPrice: 98000,
     onHand: 140,
   },
-  {
-    variantId: 'var_bundle_water',
-    sku: 'BDL-WATER-01',
-    name: 'ชุดรดน้ำต้นไม้ครบชุด (สินค้าชุด)',
-    kind: 'bundle',
-    unit: 'ชุด',
-    sellingPrice: 69000,
-    // A bundle owns no lots, so the real API reports 0 and the components
-    // answer the availability question. The mock copies that behaviour.
-    onHand: 0,
-  },
 ];
 
-const includesCaseInsensitive = (haystack: string, needle: string): boolean =>
-  haystack.toLowerCase().includes(needle.toLowerCase());
-
 export const mockCatalogApi = {
-  /** Same shape as GET /catalog/search: substring match over sku and name. */
+  /** Case-insensitive filter over SKU and product name, like the API's ilike. */
   search: (q: string, limit = 10): CatalogSearchRow[] => {
-    const needle = q.trim();
-    const rows =
-      needle === ''
-        ? MOCK_CATALOG
-        : MOCK_CATALOG.filter(
-            (row) =>
-              includesCaseInsensitive(row.sku, needle) || includesCaseInsensitive(row.name, needle),
-          );
-    return rows.slice(0, limit);
+    const needle = q.trim().toLowerCase();
+    if (needle === '') return [];
+    return MOCK_CATALOG.filter(
+      (row) => row.sku.toLowerCase().includes(needle) || row.name.toLowerCase().includes(needle),
+    ).slice(0, limit);
   },
 
-  /** The demo cannot touch the seed, so it always answers one line updated. */
+  /** Echoes the input - the demo never persists a learned mapping. */
   saveListing: (input: SaveListingInput): SaveListingResult => ({
-    listingId: `lst_${Date.now()}`,
+    listingId: `lst_mock_${input.platformSku}`,
     channelId: input.channelId,
     platformSku: input.platformSku,
     variantId: input.variantId,
     linesUpdated: 1,
   }),
 };
-
-export type MockCatalogApi = typeof mockCatalogApi;

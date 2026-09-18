@@ -62,8 +62,6 @@ export function UnmatchedPanel({ items, pendingSku, onMatch }: UnmatchedPanelPro
                   <Td numeric>{qty(item.occurrences)}</Td>
                   <Td numeric>{qty(item.quantity)}</Td>
                   <Td>
-                    {/* The picker searches the whole catalogue, so a row with no
-                        suggestions is still fixable here without leaving the screen. */}
                     <div className="flex items-center gap-2">
                       <VariantPicker
                         ariaLabel={`เลือกสินค้าที่ตรงกับ ${item.platformSku}`}
@@ -71,10 +69,7 @@ export function UnmatchedPanel({ items, pendingSku, onMatch }: UnmatchedPanelPro
                         suggestions={item.suggestions}
                         disabled={saving}
                         onChange={(variantId) =>
-                          setPicked((current) => ({
-                            ...current,
-                            [item.platformSku]: variantId,
-                          }))
+                          setPicked((current) => ({ ...current, [item.platformSku]: variantId }))
                         }
                       />
                       <Button

@@ -1,14 +1,11 @@
 /**
  * Listings: learned platform-SKU mappings.
  *
- * A channel_listings row is a human decision ("on Lazada, LZD-NEW-HAT-XL is our
- * HAT-01"). Persisting it is what turns this month's painful import into next
- * month's automatic match: buildMatchIndex feeds these rows to matchSku() with
- * the highest priority.
- *
- * rematchOpenLines is the other half of the promise made on the preview screen:
- * saving a mapping also fixes every line of the current batch that is still
- * waiting (variant_id IS NULL), so the user never clicks twice for one file.
+ * Every time a human resolves an unmatched line on the import preview screen we
+ * write a channel_listings row with `matchSource = 'manual'`, so the NEXT
+ * import matches by itself. That is why the upsert is idempotent on
+ * (channelId, platformSku) and why saving a mapping also back-fills the open
+ * order lines that are still waiting on that SKU.
  */
 
 import type { ChannelId, MatchSource, OrgId, VariantId } from '@stockhub/core';
@@ -16,27 +13,16 @@ import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import type { DbExecutor } from '../client';
 import { type ChannelListing, channelListings, orderLines, orders } from '../schema';
 
-export interface UpsertListingInput {
-  orgId: OrgId;
-  channelId: ChannelId;
-  /** SKU exactly as the platform export prints it. Stored verbatim. */
-  platformSku: string;
-  platformProductName?: string;
-  /** Null means 'known listing we deliberately ignore' (e.g. a freebie). */
-  variantId: VariantId | null;
-  matchSource: MatchSource;
-}
-
-/**
- * Create or update the mapping for (channelId, platformSku).
- *
- * Idempotent by the channel_listings_channel_sku_uq unique index: saving the
- * same decision twice (double click, retried request) updates one row instead
- * of failing or duplicating.
- */
 export const upsertListing = async (
   exec: DbExecutor,
-  input: UpsertListingInput,
+  input: {
+    orgId: OrgId;
+    channelId: ChannelId;
+    platformSku: string;
+    platformProductName?: string;
+    variantId: VariantId | null;
+    matchSource: MatchSource;
+  },
 ): Promise<ChannelListing> => {
   const [row] = await exec
     .insert(channelListings)
@@ -44,7 +30,7 @@ export const upsertListing = async (
       orgId: input.orgId,
       channelId: input.channelId,
       platformSku: input.platformSku,
-      platformProductName: input.platformProductName,
+      platformProductName: input.platformProductName ?? null,
       variantId: input.variantId,
       matchSource: input.matchSource,
     })
@@ -52,36 +38,27 @@ export const upsertListing = async (
       target: [channelListings.channelId, channelListings.platformSku],
       set: {
         variantId: input.variantId,
-        platformProductName: input.platformProductName,
+        platformProductName: input.platformProductName ?? null,
         matchSource: input.matchSource,
         updatedAt: new Date(),
       },
     })
     .returning();
-  if (!row) throw new Error('upsertListing returned no row');
+
+  if (!row) throw new Error('Upsert into channel_listings returned no row');
   return row;
 };
 
-export interface RematchOpenLinesParams {
-  orgId: OrgId;
-  channelId: ChannelId;
-  platformSku: string;
-  variantId: VariantId;
-}
-
 /**
- * Point every still-unmatched order line of this channel + platform SKU at the
- * given variant, marking them 'manual' (a human decision, not a guess).
- *
- * Only lines with variant_id IS NULL are touched: a line the matcher already
- * resolved keeps its original matchSource as the audit evidence. Returns how
- * many lines flipped, which is exactly the number the preview screen shows.
+ * Point every still-unmatched order line of this platform SKU at the variant
+ * the user just chose. Only lines whose order belongs to the channel are
+ * touched - the same SKU can mean different variants on different shops.
  */
 export const rematchOpenLines = async (
   exec: DbExecutor,
-  params: RematchOpenLinesParams,
+  params: { orgId: OrgId; channelId: ChannelId; platformSku: string; variantId: VariantId },
 ): Promise<number> => {
-  const flipped = await exec
+  const updated = await exec
     .update(orderLines)
     .set({ variantId: params.variantId, matchSource: 'manual' })
     .where(
@@ -96,13 +73,10 @@ export const rematchOpenLines = async (
       ),
     )
     .returning({ id: orderLines.id });
-  return flipped.length;
+  return updated.length;
 };
 
-/**
- * Every listing of the org, newest decisions first per channel; optionally
- * narrowed to one channel for the channel detail screen.
- */
+/** The learned mappings of an org, optionally narrowed to one channel. */
 export const listListings = async (
   exec: DbExecutor,
   params: { orgId: OrgId; channelId?: ChannelId },
@@ -118,4 +92,4 @@ export const listListings = async (
           )
         : eq(channelListings.orgId, params.orgId),
     )
-    .orderBy(asc(channelListings.channelId), asc(channelListings.platformSku));
+    .orderBy(asc(channelListings.platformSku));

@@ -1,30 +1,28 @@
 'use client';
 
 /**
- * Inline variant picker (combobox) for mapping a platform SKU onto a variant.
+ * Inline combobox for matching a platform SKU to an internal catalog variant.
  *
- * One keyboard-navigable list, two sources:
- *   1. `suggestions` - the server's ranked guesses for this exact platform SKU
- *   2. a debounced catalogApi.search across the whole catalogue, so the user
- *      can still find the right variant when no guess fits.
- *
- * Picking calls onChange(variantId, row). `row` is only set for search
- * results, because a suggestion carries no stock or price data. The chosen
- * variant stays visible as a chip so the row reads like a decision, not a form.
+ * The open/highlight/query behaviour lives in the pure reducer next door, so
+ * the keyboard logic stays unit-testable without rendering React; this file
+ * only wires that reducer to the input, the debounced catalog search and the
+ * suggestion chip.
  */
 
 import { useDebouncedValue } from '@/components/inventory/use-debounced-value';
 import { useRole } from '@/components/role-provider';
-import { Input } from '@/components/ui';
+import { Badge, SearchInput } from '@/components/ui';
 import { catalogApi } from '@/lib/api-catalog';
 import type { CatalogSearchRow } from '@/lib/api-types-catalog';
-import { percent, qty } from '@/lib/format';
+import { cn } from '@/lib/cn';
+import { percent } from '@/lib/format';
 import { useApi } from '@/lib/use-api';
-import { Check, ChevronDown } from 'lucide-react';
-import { useId, useReducer, useState } from 'react';
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { pickerInitialState, pickerReducer } from './variant-picker-state';
+import { useId, useMemo, useReducer, useState } from 'react';
+import type { KeyboardEvent } from 'react';
+import { pickerReducer } from './variant-picker-state';
+import type { PickerState } from './variant-picker-state';
 
+/** A pre-ranked match from the import API, shown above the free-text results. */
 export interface PickerSuggestion {
   variantId: string;
   sku: string;
@@ -33,196 +31,190 @@ export interface PickerSuggestion {
 }
 
 export interface VariantPickerProps {
-  /** Currently chosen variant id, '' when nothing is chosen yet. */
+  /** Chosen variant id, '' while nothing is chosen. */
   value: string;
+  /** `row` is the full catalog row for search picks; suggestions carry no row. */
   onChange: (variantId: string, row?: CatalogSearchRow) => void;
-  /** Ranked guesses the API attached to this platform SKU. */
   suggestions?: PickerSuggestion[];
   disabled?: boolean;
   ariaLabel: string;
 }
 
-/** One keyboard-navigable row. `row` exists only for full search results. */
-interface Entry {
-  kind: 'suggestion' | 'result';
+/** One selectable row in the dropdown: a suggestion or a search hit. */
+interface PickerOption {
   variantId: string;
-  sku: string;
-  name: string;
-  score?: number;
+  label: string;
   row?: CatalogSearchRow;
 }
 
-const SEARCH_DEBOUNCE_MS = 250;
-const SEARCH_LIMIT = 8;
+const optionLabel = (option: { sku: string; name: string; score?: number }): string =>
+  option.score === undefined
+    ? `${option.sku} - ${option.name}`
+    : `${option.sku} - ${option.name} (คะแนน ${percent(option.score, 0)})`;
+
+const INITIAL_STATE: PickerState = { open: false, highlighted: 0, query: '' };
 
 export function VariantPicker({
   value,
   onChange,
-  suggestions = [],
+  suggestions,
   disabled = false,
   ariaLabel,
 }: VariantPickerProps) {
   const { role } = useRole();
+  const [state, dispatch] = useReducer(pickerReducer, INITIAL_STATE);
+  // The chip must survive a refetch that drops the picked row from the list,
+  // so remember the label at pick time and only fall back to a list lookup.
+  const [picked, setPicked] = useState<{ variantId: string; label: string } | null>(null);
   const listboxId = useId();
-  const [state, dispatch] = useReducer(pickerReducer, pickerInitialState);
-  const [pickedRow, setPickedRow] = useState<
-    { variantId: string; sku: string; name: string } | undefined
-  >(undefined);
 
-  const debouncedQuery = useDebouncedValue(state.query, SEARCH_DEBOUNCE_MS);
-  const trimmedQuery = debouncedQuery.trim();
-  // An empty query must not hit the API (q is required), so it answers no rows.
-  const { data, error, loading } = useApi(
-    () =>
-      trimmedQuery === ''
-        ? Promise.resolve<CatalogSearchRow[]>([])
-        : catalogApi.search(trimmedQuery, SEARCH_LIMIT),
-    [trimmedQuery, role],
+  const debouncedQuery = useDebouncedValue(state.query);
+  const needle = debouncedQuery.trim();
+  // role belongs in the key: the API strips cost fields per role (useApi docs).
+  const { data } = useApi(
+    () => (needle === '' ? Promise.resolve<CatalogSearchRow[]>([]) : catalogApi.search(needle)),
+    [needle, role],
   );
 
-  const suggestionIds = new Set(suggestions.map((suggestion) => suggestion.variantId));
-  const results = (data ?? []).filter((row) => !suggestionIds.has(row.variantId));
-  const entries: Entry[] = [
-    ...suggestions.map(
-      (suggestion): Entry => ({
-        kind: 'suggestion',
-        variantId: suggestion.variantId,
-        sku: suggestion.sku,
-        name: suggestion.name,
-        score: suggestion.score,
-      }),
-    ),
-    ...results.map(
-      (row): Entry => ({
-        kind: 'result',
-        variantId: row.variantId,
-        sku: row.sku,
-        name: row.name,
-        row,
-      }),
-    ),
-  ];
-  const count = entries.length;
-  const activeEntry = entries[state.highlighted];
+  const suggestionOptions = useMemo<PickerOption[]>(
+    () => (suggestions ?? []).map((s) => ({ variantId: s.variantId, label: optionLabel(s) })),
+    [suggestions],
+  );
+  const resultOptions = useMemo<PickerOption[]>(
+    () => (data ?? []).map((row) => ({ variantId: row.variantId, label: optionLabel(row), row })),
+    [data],
+  );
+  // Suggestions first, search results below - the plan freezes this order.
+  const options = useMemo(
+    () => [...suggestionOptions, ...resultOptions],
+    [suggestionOptions, resultOptions],
+  );
 
-  // The chip label: the row the user picked, else the suggestion the parent
-  // pre-selected, else the bare id we know nothing about.
-  const chip =
-    pickedRow ??
-    suggestions.find((suggestion) => suggestion.variantId === value) ??
-    (value === '' ? undefined : { variantId: value, sku: value, name: '' });
+  // Highlight the UI acts on: clamped because the result list can shrink under
+  // a highlight computed for the previous query.
+  const activeIndex = options.length === 0 ? 0 : Math.min(state.highlighted, options.length - 1);
+  const activeOption = options[activeIndex];
 
-  const pick = (entry: Entry) => {
-    setPickedRow({ variantId: entry.variantId, sku: entry.sku, name: entry.name });
-    onChange(entry.variantId, entry.row);
+  const knownLabels = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const option of options) map.set(option.variantId, option.label);
+    return map;
+  }, [options]);
+
+  let chipLabel: string | undefined;
+  if (value !== '') {
+    chipLabel = picked?.variantId === value ? picked.label : knownLabels.get(value);
+    chipLabel ??= value;
+  }
+
+  const pick = (option: PickerOption): void => {
+    setPicked({ variantId: option.variantId, label: option.label });
+    onChange(option.variantId, option.row);
+    // Close without wiping the query so reopening does not force a retype.
     dispatch({ type: 'close' });
   };
 
-  const handleKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'ArrowDown') {
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
-      dispatch({ type: 'move', delta: 1, count });
-    } else if (event.key === 'ArrowUp') {
+      // Reopen first, then move: the arrows must also work on a closed list.
+      dispatch({ type: 'open' });
+      dispatch({ type: 'move', delta: event.key === 'ArrowDown' ? 1 : -1, count: options.length });
+      return;
+    }
+    if (event.key === 'Enter') {
+      if (!state.open || !activeOption) return;
       event.preventDefault();
-      dispatch({ type: 'move', delta: -1, count });
-    } else if (event.key === 'Enter') {
-      // Only an open list turns Enter into a pick; otherwise the input sits
-      // inside the panel and Enter would swallow the user's flow silently.
-      if (state.open && activeEntry) {
-        event.preventDefault();
-        pick(activeEntry);
-      }
-    } else if (event.key === 'Escape') {
+      pick(activeOption);
+      return;
+    }
+    if (event.key === 'Escape' && state.open) {
+      // preventDefault stops the browser clearing the type="search" field -
+      // that clear would fire onChange and reopen the list we just closed.
+      event.preventDefault();
       dispatch({ type: 'close' });
     }
   };
 
+  const listOpen = state.open && (options.length > 0 || needle !== '');
+
+  const renderOption = (option: PickerOption, index: number, section: string) => (
+    // The plan mandates the ARIA listbox roles; biome would rather have a
+    // native <option>, which cannot render this two-section dropdown.
+    // biome-ignore lint/a11y/useSemanticElements: ARIA combobox by design
+    <div
+      role="option"
+      key={`${section}-${option.variantId}`}
+      id={`${listboxId}-opt-${index}`}
+      aria-selected={index === activeIndex}
+      // Not tabbable on purpose: the input owns focus and announces the active
+      // option through aria-activedescendant (standard combobox pattern).
+      tabIndex={-1}
+      className={cn(
+        'cursor-pointer px-3 py-1.5 text-sm',
+        index === activeIndex ? 'bg-emerald-50 font-medium text-emerald-900' : 'text-slate-700',
+      )}
+      onClick={() => pick(option)}
+      onKeyDown={(event) => {
+        // Only reachable when an assistive tech focuses the option directly;
+        // regular keyboard traffic stays on the input.
+        if (event.key === 'Enter' || event.key === ' ') pick(option);
+      }}
+    >
+      {option.label}
+    </div>
+  );
+
   return (
     <div className="relative w-full">
-      {chip ? (
-        <span className="mb-1 inline-flex max-w-full items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">
-          <Check className="size-3 shrink-0" aria-hidden />
-          <span className="font-mono">{chip.sku}</span>
-          {chip.name ? <span className="truncate">{chip.name}</span> : null}
-        </span>
-      ) : null}
-
-      <Input
-        type="text"
+      <SearchInput
         role="combobox"
-        aria-expanded={state.open}
+        aria-expanded={listOpen}
         aria-controls={listboxId}
         aria-activedescendant={
-          state.open && activeEntry ? `${listboxId}-opt-${state.highlighted}` : undefined
+          listOpen && activeOption ? `${listboxId}-opt-${activeIndex}` : undefined
         }
         aria-autocomplete="list"
         aria-label={ariaLabel}
         value={state.query}
         disabled={disabled}
-        placeholder="พิมพ์ SKU หรือชื่อสินค้าเพื่อค้นหา"
+        placeholder="ค้นหา SKU หรือชื่อสินค้า"
         onChange={(event) => dispatch({ type: 'type', query: event.target.value })}
         onKeyDown={handleKeyDown}
       />
-      <ChevronDown
-        className="pointer-events-none absolute bottom-2.5 right-2.5 size-4 text-slate-400"
-        aria-hidden
-      />
-
-      {state.open && !disabled ? (
+      {chipLabel ? (
+        <Badge tone="info" className="mt-1 max-w-full">
+          <span className="truncate">{chipLabel}</span>
+        </Badge>
+      ) : null}
+      {listOpen ? (
+        // The plan mandates the ARIA listbox roles; biome would rather have a
+        // native <select>, which cannot render this two-section dropdown.
+        // biome-ignore lint/a11y/useSemanticElements: ARIA combobox by design
         <div
-          id={listboxId}
-          // biome-ignore lint/a11y/useSemanticElements: the WAI-ARIA combobox pattern needs a listbox driven by a text input; a native <select> cannot offer free-text search.
           role="listbox"
-          tabIndex={-1}
+          id={listboxId}
           aria-label={ariaLabel}
-          className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+          tabIndex={-1}
+          className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
         >
-          {loading && trimmedQuery !== '' ? (
-            <p className="px-3 py-2 text-xs text-slate-500">กำลังค้นหา...</p>
+          {suggestionOptions.length > 0 ? (
+            <div className="px-3 pb-0.5 pt-1.5 text-[0.65rem] font-semibold tracking-wide text-slate-400 uppercase">
+              จับคู่ใกล้เคียง
+            </div>
           ) : null}
-          {error ? <p className="px-3 py-2 text-xs text-rose-600">{error.message}</p> : null}
-          {!loading && !error && count === 0 ? (
-            <p className="px-3 py-2 text-xs text-slate-500">ไม่พบสินค้าที่ค้นหา</p>
+          {suggestionOptions.map((option, index) => renderOption(option, index, 'suggestion'))}
+          {resultOptions.length > 0 ? (
+            <div className="px-3 pb-0.5 pt-1.5 text-[0.65rem] font-semibold tracking-wide text-slate-400 uppercase">
+              ผลการค้นหา
+            </div>
           ) : null}
-
-          {suggestions.length > 0 ? (
-            <p
-              role="presentation"
-              className="px-3 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-slate-400"
-            >
-              ใกล้เคียง
-            </p>
+          {resultOptions.map((option, index) =>
+            renderOption(option, suggestionOptions.length + index, 'result'),
+          )}
+          {options.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-slate-500">ไม่พบสินค้าที่ตรงกับคำค้นหา</div>
           ) : null}
-          {entries.map((entry, index) => {
-            const highlighted = state.highlighted === index;
-            return (
-              <button
-                key={`${entry.kind}-${entry.variantId}`}
-                type="button"
-                // biome-ignore lint/a11y/useSemanticElements: the combobox listbox needs option roles for aria-activedescendant; a native <option> cannot live outside a <select>.
-                role="option"
-                id={`${listboxId}-opt-${index}`}
-                aria-selected={value === entry.variantId}
-                className={`flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs ${
-                  highlighted ? 'bg-emerald-50' : ''
-                }`}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => pick(entry)}
-              >
-                <span className="min-w-0">
-                  <span className="font-mono text-slate-900">{entry.sku}</span>{' '}
-                  <span className="text-slate-500">{entry.name}</span>
-                </span>
-                <span className="shrink-0 text-slate-400">
-                  {entry.score !== undefined
-                    ? `คะแนน ${percent(entry.score, 0)}`
-                    : entry.row
-                      ? `คงเหลือ ${qty(entry.row.onHand)}`
-                      : null}
-                </span>
-              </button>
-            );
-          })}
         </div>
       ) : null}
     </div>

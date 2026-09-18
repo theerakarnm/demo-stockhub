@@ -1,10 +1,9 @@
 /**
  * Catalog search routes.
  *
- * Routes:
- *   GET /search    free-text search over SKU / product name / variant label,
- *                  with live on-hand per row - the picker behind the POS bill
- *                  and the import preview.
+ * GET /search - the SKU picker behind the order screen and the import
+ * preview's variant picker. Read-only, so `stock:read` is enough; selling
+ * prices are not cost fields and are visible to every role.
  */
 
 import { Hono } from 'hono';

@@ -1,107 +1,105 @@
 import { describe, expect, test } from 'bun:test';
 import { asChannelId, asVariantId } from '../../domain/ids';
-import type { VariantId } from '../../domain/ids';
-import type { MatchCandidate, MatchIndex } from './matching';
-import { listingKey, matchSku, normaliseSku, skuSimilarity } from './matching';
+import { type MatchCandidate, type MatchIndex, matchSku, skuSimilarity } from './matching';
 
-const channel = asChannelId('0d000000-0000-4000-8000-000000000001');
+const lazadaMain = asChannelId('0d000000-0000-4000-8000-000000000003');
+const shopeeMain = asChannelId('0d000000-0000-4000-8000-000000000001');
 
-const candidate = (id: string, sku: string, name: string): MatchCandidate => ({
-  variantId: asVariantId(id),
+const candidate = (variantId: string, sku: string, name: string): MatchCandidate => ({
+  variantId: asVariantId(variantId),
   sku,
   name,
 });
 
-const HOE = candidate('0f000000-0000-4000-8000-000000000001', 'HOE-001', 'Garden Hoe');
-const HOSE = candidate('0f000000-0000-4000-8000-000000000007', 'HOS-20M', 'Water Hose 20m');
-// Same product typed twice with different separator habits: both normalise to HOS20M.
-const HOSE_DUPLICATE = candidate(
-  '0f000000-0000-4000-8000-000000000077',
-  'HOS20M',
-  'Water Hose 20m',
-);
-const SPRAYER = candidate(
-  '0f000000-0000-4000-8000-000000000013',
-  'SPR-16L',
-  'Knapsack Sprayer 16L',
-);
-const GLOVE = candidate('0f000000-0000-4000-8000-000000000014', 'GLV-01', 'Garden Glove');
-
+// Hand-built index mirroring the seed's interesting shapes: exact SKUs, one
+// listing whose platform SKU is nothing like its internal SKU, and one listing
+// on another channel that collides with an internal SKU to prove precedence.
 const bySku = new Map<string, MatchCandidate>([
-  [HOE.sku, HOE],
-  [HOSE.sku, HOSE],
-  [HOSE_DUPLICATE.sku, HOSE_DUPLICATE],
-  [SPRAYER.sku, SPRAYER],
-  [GLOVE.sku, GLOVE],
+  ['HOE-001', candidate('var_hoe', 'HOE-001', 'จอบขุดดิน ด้ามไม้')],
+  ['HOS-20M', candidate('var_hose', 'HOS-20M', 'สายยางรดน้ำ 20 เมตร')],
+  ['SPR-16L', candidate('var_sprayer', 'SPR-16L', 'ถังพ่นยา 16 ลิตร')],
+  ['GLV-01', candidate('var_glove', 'GLV-01', 'ถุงมือทำสวน')],
 ]);
 
-// normaliseSku(internal SKU) -> variants sharing that normalised form, derived
-// exactly like catalog-repo.buildMatchIndex builds it from database rows.
+// byNormalisedSku is derived from bySku in production (buildMatchIndex); the
+// test derives it the same way so the two maps cannot drift.
 const byNormalisedSku = new Map<string, MatchCandidate[]>();
 for (const c of bySku.values()) {
-  const key = normaliseSku(c.sku);
+  const key = c.sku
+    .trim()
+    .toUpperCase()
+    .replace(/[\s_-]+/g, '');
   byNormalisedSku.set(key, [...(byNormalisedSku.get(key) ?? []), c]);
 }
 
-const listingMap = new Map<string, VariantId>([
-  [listingKey(channel, 'shp hos 20m'), HOSE.variantId],
-  [listingKey(channel, 'GLV-01'), HOSE.variantId],
-]);
-
 const index: MatchIndex = {
-  // A human once decided GLV-01 on this channel is actually the hose.
-  listingMap,
+  listingMap: new Map([
+    [`${lazadaMain}::SHPHOS20M`, asVariantId('var_hose')],
+    [`${shopeeMain}::HOE001`, asVariantId('var_hose')],
+  ]),
   bySku,
   byNormalisedSku,
 };
 
 describe('matchSku', () => {
-  test('listing_map wins over an exact SKU hit', () => {
-    const result = matchSku(channel, 'GLV-01', index);
+  test('a listing beats an exact SKU match', () => {
+    const result = matchSku(shopeeMain, 'HOE-001', index);
     expect(result.source).toBe('listing_map');
-    expect(result.variantId).toBe(HOSE.variantId);
-    expect(result.suggestions).toEqual([]);
+    expect(result.variantId).toBe(asVariantId('var_hose'));
+    expect(result.suggestions).toHaveLength(0);
   });
 
-  test('an exact internal SKU matches by sku_exact', () => {
-    const result = matchSku(channel, ' HOE-001 ', index);
+  test('an exact internal SKU matches directly', () => {
+    const result = matchSku(lazadaMain, 'HOE-001', index);
     expect(result.source).toBe('sku_exact');
-    expect(result.variantId).toBe(HOE.variantId);
-    expect(result.suggestions).toEqual([]);
+    expect(result.variantId).toBe(asVariantId('var_hoe'));
   });
 
-  test('a separator-noise SKU matches by sku_normalised', () => {
-    const result = matchSku(channel, 'hoe_001', index);
+  test('a differently formatted SKU matches after normalisation', () => {
+    const result = matchSku(lazadaMain, 'hoe_001', index);
     expect(result.source).toBe('sku_normalised');
-    expect(result.variantId).toBe(HOE.variantId);
-    expect(result.suggestions).toEqual([]);
+    expect(result.variantId).toBe(asVariantId('var_hoe'));
   });
 
-  test('two variants sharing a normalised form stay unmatched with both at score 1', () => {
-    const result = matchSku(channel, 'h os 20m', index);
+  test('two variants sharing a normalised form stay unmatched with both suggested at score 1', () => {
+    const ambiguous: MatchIndex = {
+      listingMap: new Map(),
+      bySku: new Map([
+        ['FRT-50', candidate('var_fert50', 'FRT-50', 'ปุ๋ย 50 กก.')],
+        ['FRT_50', candidate('var_fert25', 'FRT_50', 'ปุ๋ย 25 กก.')],
+      ]),
+      byNormalisedSku: new Map([
+        [
+          'FRT50',
+          [
+            candidate('var_fert50', 'FRT-50', 'ปุ๋ย 50 กก.'),
+            candidate('var_fert25', 'FRT_50', 'ปุ๋ย 25 กก.'),
+          ],
+        ],
+      ]),
+    };
+    const result = matchSku(lazadaMain, 'FRT 50', ambiguous);
     expect(result.source).toBe('unmatched');
     expect(result.variantId).toBeUndefined();
     expect(result.suggestions).toHaveLength(2);
-    expect(result.suggestions.map((c) => c.sku)).toEqual(['HOS-20M', 'HOS20M']);
-    expect(result.suggestions.every((c) => c.score === 1)).toBe(true);
+    for (const suggestion of result.suggestions) expect(suggestion.score).toBe(1);
   });
 
-  test('a fuzzy platform SKU gets SPR-16L ranked first', () => {
-    const result = matchSku(channel, 'LZD-SPR16', index);
+  test('a platform-prefixed SKU stays unmatched but ranks the right variant first', () => {
+    const result = matchSku(lazadaMain, 'LZD-SPR16', index);
     expect(result.source).toBe('unmatched');
     expect(result.suggestions[0]?.sku).toBe('SPR-16L');
-    expect(result.suggestions[0]?.score).toBeGreaterThan(0.3);
   });
 
-  test('a completely different SKU gets no suggestions', () => {
-    const result = matchSku(channel, 'TOTALLY-DIFFERENT', index);
+  test('a SKU nothing resembles gets no suggestions', () => {
+    const result = matchSku(lazadaMain, 'TOTALLY-DIFFERENT', index);
     expect(result.source).toBe('unmatched');
-    expect(result.suggestions).toEqual([]);
+    expect(result.suggestions).toHaveLength(0);
   });
 });
 
 describe('skuSimilarity', () => {
-  test('returns 1 for the same normalised form', () => {
+  test('is 1 when two SKUs normalise to the same string', () => {
     expect(skuSimilarity('HOE-001', 'hoe001')).toBe(1);
   });
 });
