@@ -95,6 +95,16 @@ export const thingRouter = new Hono<AppEnv>().get(
 5. Use `ok()` or `paginated()`, never `c.json()`, so cost hiding keeps working.
 6. Add a test to `src/index.test.ts`.
 
+## Contract
+
+New endpoints this wave (response shapes in `src/types/contract-catalog.ts`, mirrored in `apps/web/src/lib/api-types-catalog.ts`).
+
+| Endpoint | Permission | Request | Response |
+| --- | --- | --- | --- |
+| `GET /api/v1/catalog/search?q=&limit=` | `stock:read` | query: `q` 1-120 chars, `limit` 1-50 (default 10) | `CatalogSearchRow[]` |
+| `POST /api/v1/listings` | `import:run` | body: `SaveListingInput` | `SaveListingResult` |
+| `GET /api/v1/listings?channelId=` | `stock:read` | query: `channelId` optional | `ListingView[]` |
+
 ## Error contract
 
 Every failure answers with `{ "error": { "code", "message", "details"? } }`.
