@@ -1,12 +1,26 @@
 /**
- * Listing write routes - stub reserved by Task 5.
+ * Listing write routes - the learned platform-SKU mappings.
  *
- * Mounted in src/index.ts so the URL space and the middleware chain exist
- * before Task 24 (Track C) fills the endpoints in. An empty router answers 404
- * with the error envelope, which is the honest answer until then.
+ * POST /          save a human match decision (import:run, the import preview's role)
+ * GET /           list the learned mappings of the org, optionally per channel
+ *
+ * The POST is idempotent (upsert on channel + platform SKU), so it answers
+ * 200 rather than 201: it is a save, not a fresh resource creation.
  */
 
 import { Hono } from 'hono';
+import { ok } from '../lib/response';
+import { validate } from '../lib/validate';
+import { requirePermission } from '../middleware/require-permission';
+import { listListingsQuery, saveListingBody } from '../schemas/catalog';
+import { serviceContext } from '../services/context';
+import { listListings, saveListing } from '../services/matching-service';
 import type { AppEnv } from '../types/app';
 
-export const listingsRouter = new Hono<AppEnv>();
+export const listingsRouter = new Hono<AppEnv>()
+  .post('/', requirePermission('import:run'), validate('json', saveListingBody), async (c) =>
+    ok(c, await saveListing(serviceContext(c), c.req.valid('json'))),
+  )
+  .get('/', requirePermission('stock:read'), validate('query', listListingsQuery), async (c) =>
+    ok(c, await listListings(serviceContext(c), c.req.valid('query'))),
+  );
