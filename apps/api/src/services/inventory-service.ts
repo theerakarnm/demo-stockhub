@@ -7,16 +7,21 @@
  */
 
 import {
-  NotImplementedError,
+  ForbiddenError,
   StockHubError,
   asVariantId,
+  asWarehouseId,
   bundleAvailability,
+  can,
+  isInbound,
+  planMovements,
+  satang,
 } from '@stockhub/core';
-import type { MovementReason, VariantId } from '@stockhub/core';
+import type { MovementReason, MovementRequest, StockLot, VariantId } from '@stockhub/core';
 import { catalogRepo, inventoryRepo, movementRepo } from '@stockhub/db';
 import { decodeCursor, encodeCursor } from '../lib/cursor';
 import { MAX_LIMIT } from '../schemas/common';
-import type { AdjustStockBody, ListInventoryQuery } from '../schemas/inventory';
+import type { AdjustStockBody, ListInventoryQuery, ReceiveStockBody } from '../schemas/inventory';
 import type { ListMovementsQuery } from '../schemas/movements';
 import type {
   BundleComponentRow,
@@ -270,21 +275,120 @@ export const toMovementView = (row: movementRepo.HistoryRow): Movement => ({
 });
 
 /**
+ * One stock-moving write, shared by goods receipt and manual adjustment.
+ *
+ * Transaction outline (AGENTS.md rule 5):
+ *   1. resolve the org's default warehouse - writes always land there
+ *   2. outbound reasons lock the variant's open lots: SELECT ... FOR UPDATE
+ *   3. planMovements computes the ledger row + lot slices as pure functions
+ *   4. recordMovements inserts the movement, consumptions and lot deltas
+ *
+ * The movement is read back through listHistory inside the same transaction so
+ * the caller gets the wire shape (qtyAfter, sku) in one round trip, and the
+ * read can never race its own write.
+ */
+const writeMovement = async (
+  ctx: ServiceContext,
+  request: Omit<MovementRequest, 'warehouseId'>,
+  reference?: string,
+): Promise<Movement> =>
+  ctx.db().transaction(async (tx) => {
+    const orgId = ctx.auth.orgId;
+    const warehouse = await inventoryRepo.getDefaultWarehouse(tx, { orgId });
+    const lotsByVariant = new Map<VariantId, readonly StockLot[]>();
+    for (const line of request.lines) {
+      if (!isInbound(request.reason)) {
+        lotsByVariant.set(
+          line.variantId,
+          await inventoryRepo.getOpenLotsForUpdate(tx, {
+            orgId,
+            variantId: line.variantId,
+            warehouseId: asWarehouseId(warehouse.id),
+          }),
+        );
+      }
+    }
+    const planned = planMovements(
+      { ...request, warehouseId: asWarehouseId(warehouse.id) },
+      {
+        lotsByVariant,
+      },
+    );
+    const [recorded] = await movementRepo.recordMovements(tx, {
+      orgId,
+      planned,
+      createdBy: ctx.auth.userId,
+      note: request.note,
+      reference,
+    });
+    if (!recorded) throw new StockHubError('conflict', 'Nothing moved');
+    const [row] = await movementRepo.listHistory(tx, {
+      orgId,
+      variantId: recorded.variantId,
+      limit: 1,
+    });
+    if (!row) throw new Error('Movement vanished inside its own transaction');
+    return toMovementView(row);
+  });
+
+/**
+ * Goods receipt: one inbound line that opens a FIFO lot at `unitCost`.
+ *
+ * The route already gated `stock:adjust`, but a receipt also WRITES cost data,
+ * so `cost:write` is enforced here where the write happens - a route change
+ * could never silently drop it.
+ */
+export const receiveStock = async (
+  ctx: ServiceContext,
+  body: ReceiveStockBody,
+): Promise<Movement> => {
+  if (!can(ctx.auth.role, 'cost:write')) throw new ForbiddenError('cost:write');
+  return writeMovement(
+    ctx,
+    {
+      reason: 'purchase_in',
+      occurredAt: body.receivedAt ? new Date(body.receivedAt) : ctx.clock.now(),
+      note: body.note,
+      lines: [
+        { variantId: asVariantId(body.variantId), qty: body.qty, unitCost: satang(body.unitCost) },
+      ],
+    },
+    body.reference,
+  );
+};
+
+/**
  * Manual stock correction (stock count, damage, loss).
  *
- * Transaction outline:
- *   1. lock the variant's open lots: SELECT ... FOR UPDATE
- *   2. positive delta -> planMovements({ reason: 'adjust_in' }) opens a new lot
- *      at the given unitCost (required; an inbound unit with no cost breaks FIFO)
- *   3. negative delta -> planMovements({ reason: 'adjust_out' }) consumes lots
- *      via consumeFifo(..., { onShortage: 'error' })
- *   4. insert the movement row + lot deltas, then commit
+ * Positive delta becomes adjust_in and NEEDS a unitCost: an inbound unit with
+ * no cost would break FIFO valuation, so it is a 400, not a silent zero.
+ * Negative delta becomes adjust_out and consumes lots FIFO with
+ * `onShortage: 'error'` - a correction that the warehouse cannot cover is a
+ * 409, not a silent shortfall.
  */
 export const adjustStock = async (
-  _ctx: ServiceContext,
-  _body: AdjustStockBody,
+  ctx: ServiceContext,
+  body: AdjustStockBody,
 ): Promise<Movement> => {
-  throw new NotImplementedError('adjustStock');
+  const reason = adjustReason(body.qtyDelta);
+  if (reason === 'adjust_in') {
+    if (body.unitCost === undefined) {
+      throw new StockHubError('validation_error', 'unitCost is required for an inbound adjustment');
+    }
+    if (!can(ctx.auth.role, 'cost:write')) throw new ForbiddenError('cost:write');
+  }
+  return writeMovement(ctx, {
+    reason,
+    occurredAt: ctx.clock.now(),
+    note: body.note,
+    lines: [
+      {
+        variantId: asVariantId(body.variantId),
+        qty: Math.abs(body.qtyDelta),
+        unitCost: body.unitCost === undefined ? undefined : satang(body.unitCost),
+      },
+    ],
+  });
 };
 
 /** Reason picker shared by the adjust path. Kept here so the rule is testable. */

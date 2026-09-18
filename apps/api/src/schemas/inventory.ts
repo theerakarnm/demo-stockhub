@@ -31,3 +31,16 @@ export const adjustStockBody = z.object({
 });
 
 export type AdjustStockBody = z.infer<typeof adjustStockBody>;
+
+/** Goods receipt. Guarded by the `stock:adjust` permission; the service also
+ *  requires `cost:write`, because a receipt writes a FIFO cost layer. */
+export const receiveStockBody = z.object({
+  variantId: idString,
+  qty: z.number().int().positive(),
+  unitCost: z.number().int().nonnegative(),
+  reference: z.string().trim().max(80).optional(),
+  receivedAt: z.string().datetime({ offset: true }).optional(),
+  note: z.string().trim().max(280).optional(),
+});
+
+export type ReceiveStockBody = z.infer<typeof receiveStockBody>;

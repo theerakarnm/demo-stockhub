@@ -5,6 +5,7 @@
  *   GET /                              list + search + low stock filter
  *   GET /:variantId                    one variant with its FIFO lots
  *   GET /:variantId/movements          that variant's stock history
+ *   POST /receive                      goods receipt (stock:adjust + cost:write)
  *   POST /adjust                       manual correction (stock:adjust)
  *
  * The list is the screen that proves the role feature: avgUnitCost and stockValue
@@ -16,7 +17,12 @@ import { Hono } from 'hono';
 import { ok } from '../lib/response';
 import { validate } from '../lib/validate';
 import { requirePermission } from '../middleware/require-permission';
-import { adjustStockBody, listInventoryQuery, variantParam } from '../schemas/inventory';
+import {
+  adjustStockBody,
+  listInventoryQuery,
+  receiveStockBody,
+  variantParam,
+} from '../schemas/inventory';
 import { listMovementsQuery } from '../schemas/movements';
 import { serviceContext } from '../services/context';
 import {
@@ -24,6 +30,7 @@ import {
   getVariantDetail,
   listInventory,
   listMovements,
+  receiveStock,
 } from '../services/inventory-service';
 import type { AppEnv } from '../types/app';
 
@@ -55,15 +62,18 @@ export const inventoryRouter = new Hono<AppEnv>()
     },
   )
   .post(
+    '/receive',
+    // Receiving needs stock:adjust like any stock write; the cost side
+    // (opening a FIFO lot) is additionally gated to cost:write in the service.
+    requirePermission('stock:adjust'),
+    validate('json', receiveStockBody),
+    async (c) => ok(c, await receiveStock(serviceContext(c), c.req.valid('json')), 201),
+  )
+  .post(
     '/adjust',
     // Adjusting stock needs stock:adjust. Setting the cost of an inbound
     // adjustment additionally needs cost:write, checked inside the service.
     requirePermission('stock:adjust'),
     validate('json', adjustStockBody),
-    async (c) => {
-      // Real path already wired: the service throws NotImplementedError, which
-      // middleware/error.ts turns into HTTP 501 with a machine readable code.
-      const movement = await adjustStock(serviceContext(c), c.req.valid('json'));
-      return ok(c, movement, 201);
-    },
+    async (c) => ok(c, await adjustStock(serviceContext(c), c.req.valid('json')), 201),
   );
