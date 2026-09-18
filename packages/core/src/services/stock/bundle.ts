@@ -4,12 +4,9 @@
  * A bundle has no stock of its own. Selling 1 "ชุดอุปกรณ์ตัดหญ้า" must consume
  * its components. Availability of a bundle = min over components of
  * floor(componentAvailable / componentQty).
- *
- * TODO(template): implement both functions.
  */
 
 import type { VariantId } from '../../domain/ids';
-import { NotImplementedError } from '../../errors';
 
 export interface BundleComponent {
   componentVariantId: VariantId;
@@ -26,16 +23,50 @@ export interface ExpandedLine {
 
 /** Replace every bundle line with its component lines. Simple lines pass through. */
 export const expandBundles = (
-  _lines: readonly { variantId: VariantId; qty: number }[],
-  _componentsByBundle: ReadonlyMap<VariantId, readonly BundleComponent[]>,
+  lines: readonly { variantId: VariantId; qty: number }[],
+  componentsByBundle: ReadonlyMap<VariantId, readonly BundleComponent[]>,
 ): ExpandedLine[] => {
-  throw new NotImplementedError('expandBundles');
+  const out: ExpandedLine[] = [];
+  for (const line of lines) {
+    const components = componentsByBundle.get(line.variantId);
+    if (components === undefined || components.length === 0) {
+      out.push({ variantId: line.variantId, qty: line.qty });
+      continue;
+    }
+    for (const component of components) {
+      // A component that is itself a bundle is rejected at write time (catalog-repo), so one level is enough.
+      out.push({
+        variantId: component.componentVariantId,
+        qty: component.qtyPerBundle * line.qty,
+        fromBundleVariantId: line.variantId,
+      });
+    }
+  }
+  return mergeSameVariant(out);
+};
+
+/** Two lines for the same variant (a component sold alone and inside a bundle) become one ledger line. */
+const mergeSameVariant = (lines: ExpandedLine[]): ExpandedLine[] => {
+  const byKey = new Map<string, ExpandedLine>();
+  for (const line of lines) {
+    const key = `${line.variantId}::${line.fromBundleVariantId ?? ''}`;
+    const existing = byKey.get(key);
+    if (existing) existing.qty += line.qty;
+    else byKey.set(key, { ...line });
+  }
+  return [...byKey.values()];
 };
 
 /** How many bundles can be sold right now, given component on-hand quantities. */
 export const bundleAvailability = (
-  _components: readonly BundleComponent[],
-  _onHandByVariant: ReadonlyMap<VariantId, number>,
+  components: readonly BundleComponent[],
+  onHandByVariant: ReadonlyMap<VariantId, number>,
 ): number => {
-  throw new NotImplementedError('bundleAvailability');
+  if (components.length === 0) return 0;
+  let available = Number.POSITIVE_INFINITY;
+  for (const component of components) {
+    const onHand = onHandByVariant.get(component.componentVariantId) ?? 0;
+    available = Math.min(available, Math.floor(onHand / component.qtyPerBundle));
+  }
+  return Number.isFinite(available) ? Math.max(available, 0) : 0;
 };
