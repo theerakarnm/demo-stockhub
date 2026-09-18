@@ -12,6 +12,7 @@
  * <CostValue>. Search for "CostValue" to audit that in one grep.
  */
 
+import { PermissionGate } from '@/components/permission-gate';
 import { useRole } from '@/components/role-provider';
 import { cn } from '@/lib/cn';
 import { baht } from '@/lib/format';
@@ -61,11 +62,14 @@ export interface CostGateProps {
 
 /**
  * Hides a whole block (a cost column, a margin card, the COGS report) rather
- * than masking a single number.
+ * than masking a single number. Now a thin alias over the general gate.
  */
 export function CostGate({ children, fallback = null }: CostGateProps) {
-  const { canReadCost } = useRole();
-  return <>{canReadCost ? children : fallback}</>;
+  return (
+    <PermissionGate permission="cost:read" fallback={fallback}>
+      {children}
+    </PermissionGate>
+  );
 }
 
 /** Inline explanation used at the bottom of cost-gated screens. */
