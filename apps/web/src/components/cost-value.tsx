@@ -62,8 +62,7 @@ export interface CostGateProps {
 
 /**
  * Hides a whole block (a cost column, a margin card, the COGS report) rather
- * than masking a single number. Thin alias over PermissionGate, kept so cost
- * call sites keep speaking about cost while every gate shares one implementation.
+ * than masking a single number. Now a thin alias over the general gate.
  */
 export function CostGate({ children, fallback = null }: CostGateProps) {
   return (

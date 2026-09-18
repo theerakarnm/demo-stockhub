@@ -49,10 +49,11 @@ The middleware fails closed: with `DEMO_MODE` not set to `true` every request is
 
 ## Field visibility
 
-Every JSON response under `/api/v1` is redacted by `src/middleware/redact.ts` using `FIELD_POLICIES` in `packages/core/src/rbac.ts`.
-When adding a field that contains cost, add its key to `COST_KEYS`, and for a tier price field add it to `PRICE_TIER_KEYS`.
-Mark the field `/** cost field */` or `/** tier field */` in `src/types/`, and `src/contract-audit.test.ts` fails otherwise.
-`ok()` remains the required helper for every successful response.
+Every JSON response under `/api/v1` is redacted by `redactMiddleware` using `FIELD_POLICIES` in `packages/core/src/rbac.ts`.
+When adding a field that contains cost, add its key to `COST_KEYS`.
+For a tier price field, add it to `PRICE_TIER_KEYS`.
+Mark it `/** cost field */` or `/** tier field */` in the contract, and `contract-audit.test.ts` fails otherwise.
+`ok()` remains the required helper.
 
 ## Bindings
 
@@ -101,16 +102,6 @@ export const thingRouter = new Hono<AppEnv>().get(
 4. Export it from `src/routes/index.ts` and mount it on `v1` in `src/index.ts`.
 5. Use `ok()` or `paginated()`, never `c.json()`, so cost hiding keeps working.
 6. Add a test to `src/index.test.ts`.
-
-## Contract
-
-New endpoints this wave (response shapes in `src/types/contract-catalog.ts`, mirrored in `apps/web/src/lib/api-types-catalog.ts`).
-
-| Endpoint | Permission | Request | Response |
-| --- | --- | --- | --- |
-| `GET /api/v1/catalog/search?q=&limit=` | `stock:read` | query: `q` 1-120 chars, `limit` 1-50 (default 10) | `CatalogSearchRow[]` |
-| `POST /api/v1/listings` | `import:run` | body: `SaveListingInput` | `SaveListingResult` |
-| `GET /api/v1/listings?channelId=` | `stock:read` | query: `channelId` optional | `ListingView[]` |
 
 ## Error contract
 

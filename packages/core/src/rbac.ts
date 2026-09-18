@@ -7,8 +7,6 @@
  *
  * Usage:
  *   if (!can(role, 'cost:read')) return stripCost(rows);
- *   // or apply the whole policy table (cost + tier + future fields) at once:
- *   return redactForRole(role, rows);
  */
 
 import type { Role } from './domain/enums';
@@ -112,9 +110,9 @@ export const COST_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Wire keys that carry tier pricing data. Filtered exactly like COST_KEYS but
- * gated by `price_tier:read` instead: sales quotes a tier price while
- * stock_staff must not even see that the tier system exists.
+ * Tier pricing keys follow the same lifecycle as cost keys: a response that
+ * names them disappears for roles without `price_tier:read` (sales sees them,
+ * stock_staff does not).
  */
 export const PRICE_TIER_KEYS: ReadonlySet<string> = new Set([
   'priceTierId',
@@ -124,43 +122,39 @@ export const PRICE_TIER_KEYS: ReadonlySet<string> = new Set([
   'priceSource',
 ]);
 
-/** One visibility rule: a caller without `permission` never receives `keys`. */
+/** One redaction policy: a permission gates a set of payload keys. */
 export interface FieldPolicy {
   permission: Permission;
   keys: ReadonlySet<string>;
 }
 
 /**
- * The whole field visibility policy in one table. Response helpers and the
- * response middleware both derive their behaviour from here, so registering a
- * sensitive key once hides it everywhere, for every current and future route.
+ * Every key set and the permission that guards it, in one table.
+ *
+ * A reviewer reads the whole redaction policy from this list; a new field
+ * category means adding one entry here plus its key set, not a new middleware.
  */
 export const FIELD_POLICIES: readonly FieldPolicy[] = [
   { permission: 'cost:read', keys: COST_KEYS },
   { permission: 'price_tier:read', keys: PRICE_TIER_KEYS },
 ];
 
-const BLOCKED_KEYS_CACHE = new Map<Role, ReadonlySet<string>>();
-
 /** Union of the keys of every policy whose permission the role lacks. */
 export const blockedKeysFor = (role: Role): ReadonlySet<string> => {
-  const cached = BLOCKED_KEYS_CACHE.get(role);
-  if (cached) return cached;
   const blocked = new Set<string>();
   for (const policy of FIELD_POLICIES) {
     if (can(role, policy.permission)) continue;
     for (const key of policy.keys) blocked.add(key);
   }
-  BLOCKED_KEYS_CACHE.set(role, blocked);
   return blocked;
 };
 
 /**
- * Deep copy of `payload` with every key in `keys` removed at any depth.
+ * Strip every blocked key from an arbitrary payload shape, at any depth.
  *
- * Primitives, null and Date instances pass through untouched. A Date carries
- * no enumerable keys, so an unguarded Object.entries walk would silently turn
- * every timestamp into `{}`.
+ * Primitives, `null` and `Date` instances pass through untouched; a `Date` is
+ * an object whose entries list is empty, so it must be short-circuited before
+ * the plain-object branch or it comes back as `{}`.
  */
 export const stripKeys = <T>(payload: T, keys: ReadonlySet<string>): T => {
   if (payload instanceof Date) return payload;
@@ -175,15 +169,8 @@ export const stripKeys = <T>(payload: T, keys: ReadonlySet<string>): T => {
   return out as T;
 };
 
-/**
- * Remove every cost-bearing field from an API payload.
- *
- * Kept as a named helper because existing call sites speak about cost only.
- * New code should prefer redactForRole(), which applies the whole policy
- * table and can never disagree with the middleware about visibility.
- */
-export const stripCost = <T>(payload: T): T => stripKeys(payload, COST_KEYS);
-
-/** Redact a payload for one role: every blocked key disappears, at any depth. */
+/** Redact a payload for one role using the FIELD_POLICIES table. */
 export const redactForRole = <T>(role: Role, payload: T): T =>
   stripKeys(payload, blockedKeysFor(role));
+
+export const stripCost = <T>(payload: T): T => stripKeys(payload, COST_KEYS);

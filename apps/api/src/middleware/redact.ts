@@ -1,19 +1,10 @@
 /**
- * Automatic response redaction.
+ * Role-aware redaction of every JSON response under /api/v1.
  *
- * Mounted on v1 around every route, this rewrites each JSON response with
- * redactForRole() after the handler has run, whether the handler answered
- * through ok(), paginated() or a raw c.json(). A new route is therefore
- * filtered without writing a line of permission code: registering a key in
- * FIELD_POLICIES is the whole work.
- *
- * The handler-level ok() keeps stripping too. Both layers read the same policy
- * table in packages/core/src/rbac.ts, so they cannot disagree, and running the
- * payload twice is idempotent.
- *
- * Gotcha: replacing c.res must drop the stale content-length header, or the
- * client reads a truncated body. Copy the headers, delete that one, and let
- * the runtime recompute it.
+ * Mounted on v1 before every route so responses are rewritten after `next()`
+ * in one place. Role-aware redaction must not be scattered into handlers; this
+ * is the single seam where that policy lands, and it wraps whatever the handler
+ * produced - `ok()`, `paginated()` or a raw `c.json()`.
  */
 
 import { redactForRole } from '@stockhub/core';
@@ -25,11 +16,11 @@ export const redactMiddleware = createMiddleware<AppEnv>(async (c, next) => {
   const res = c.res;
   if (!res.headers.get('content-type')?.includes('application/json')) return;
   const auth = c.get('auth');
-  // Error envelopes carry no business fields, and no auth means the request
-  // never reached a business route, so there is nothing to redact against.
-  if (!auth || res.status >= 400) return;
+  if (!auth || res.status >= 400) return; // error envelopes carry no business fields
   const body: unknown = await res.clone().json();
   const redacted = redactForRole(auth.role, body);
+  // The old body's content-length is now wrong; drop it or the client reads a
+  // truncated body, and let the runtime recompute it from the new body.
   const headers = new Headers(res.headers);
   headers.delete('content-length');
   c.res = new Response(JSON.stringify(redacted), { status: res.status, headers });

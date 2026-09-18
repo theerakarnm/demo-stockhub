@@ -1,23 +1,24 @@
-/**
- * Tests for the pure visibility helper behind <PermissionGate>.
- *
- * The helper is re-exported next to the component, but this file imports it
- * from src/lib/permissions.ts: that module has no '@/' aliases in its graph,
- * and `bun test` from the repo root resolves files without the web app's
- * tsconfig path mapping. Only the helper is tested, on purpose: rendering the
- * component would need a RoleProvider wrapper for one boolean branch, and the
- * component itself is two lines around this function.
- */
+// Tests for the pure permission predicate exported next to <PermissionGate>.
+//
+// bun test runs from the monorepo root, where apps/web's tsconfig `paths` are
+// invisible; importing the real role-provider would fail to resolve its
+// `@/lib/...` imports. The mock keeps the loaded module graph React-free, which
+// is enough here: isVisible() only calls can() from @stockhub/core.
 
-import { describe, expect, test } from 'bun:test';
-import { isVisible } from '../lib/permissions';
+import { describe, expect, mock, test } from 'bun:test';
+
+mock.module('./role-provider', () => ({
+  useRole: () => ({ hasPermission: () => false }),
+}));
+
+const { isVisible } = await import('./permission-gate');
 
 describe('isVisible', () => {
-  test('sales may see tier prices', () => {
+  test('sales may see tier pricing', () => {
     expect(isVisible('sales', 'price_tier:read')).toBe(true);
   });
 
-  test('stock_staff may not see tier prices', () => {
+  test('stock_staff may not see tier pricing', () => {
     expect(isVisible('stock_staff', 'price_tier:read')).toBe(false);
   });
 });
