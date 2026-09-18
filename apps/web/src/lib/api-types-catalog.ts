@@ -1,13 +1,17 @@
 /**
- * Wire contract for catalog and listing endpoints.
+ * Wire types for the catalog search and listing endpoints, base path /api/v1.
  *
- * Consumed by the web app (apps/web/src/lib/api-types-catalog.ts must mirror
- * this file field for field) and by the import preview screen. It is
- * re-exported from ./contract.ts from day one.
+ * Mirror of apps/api/src/types/contract-catalog.ts - if a field moves, change
+ * BOTH sides in the same commit. Kept out of api-types.ts so parallel tracks
+ * never edit the same file.
+ *
+ * Money rule: every money field is an INTEGER number of satang (1 THB = 100
+ * satang), exactly like `Satang` in @stockhub/core. Format them with the
+ * helpers in src/lib/format.ts, never with toFixed().
  */
 
 import type { MatchSource, VariantKind } from '@stockhub/core';
-import type { MoneyOnWire } from './contract';
+import type { MoneyAmount } from './api-types';
 
 /** One row of GET /api/v1/catalog/search - the SKU picker result line. */
 export interface CatalogSearchRow {
@@ -18,7 +22,7 @@ export interface CatalogSearchRow {
   kind: VariantKind;
   /** Selling unit, e.g. "ชิ้น", "ชุด". */
   unit: string;
-  sellingPrice: MoneyOnWire;
+  sellingPrice: MoneyAmount;
   /** Live on-hand, so the picker can grey out what the shop cannot ship. */
   onHand: number;
 }
