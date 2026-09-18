@@ -1,6 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { ROLES } from './domain/enums';
-import { COST_KEYS, PERMISSIONS, can, permissionsOf, stripCost } from './rbac';
+import {
+  COST_KEYS,
+  FIELD_POLICIES,
+  PERMISSIONS,
+  can,
+  permissionsOf,
+  redactForRole,
+  stripCost,
+} from './rbac';
 
 describe('role matrix', () => {
   test('owner holds every permission', () => {
@@ -36,6 +44,37 @@ describe('stripCost', () => {
   test('every documented cost key is in the set', () => {
     for (const key of ['unitCost', 'stockValue', 'cogs', 'margin', 'consumptions', 'grossProfit']) {
       expect(COST_KEYS.has(key)).toBe(true);
+    }
+  });
+});
+
+describe('redactForRole', () => {
+  const payload = { unitCost: 1, priceTierId: 'x', sku: 'a' };
+
+  test('sales keeps tier keys and sku, loses only cost', () => {
+    const out = redactForRole('sales', payload);
+    expect(out.sku).toBe('a');
+    expect(out.priceTierId).toBe('x');
+    expect('unitCost' in out).toBe(false);
+  });
+  test('stock_staff keeps only sku', () => {
+    // The static type keeps T even though runtime keys are dropped, so state
+    // the stripped shape as a record (same trick as the stripCost test above).
+    const out: Record<string, unknown> = redactForRole('stock_staff', payload);
+    expect(out).toEqual({ sku: 'a' });
+  });
+  test('owner gets the payload unchanged', () => {
+    expect(redactForRole('owner', payload)).toEqual(payload);
+  });
+  test('a nested Date survives redaction as a Date', () => {
+    const at = new Date('2025-01-01T00:00:00Z');
+    const out = redactForRole('sales', { at, unitCost: 1 });
+    expect(out.at).toBe(at);
+    expect(out.at instanceof Date).toBe(true);
+  });
+  test('every key of every policy is a camelCase identifier', () => {
+    for (const policy of FIELD_POLICIES) {
+      for (const key of policy.keys) expect(key).toMatch(/^[a-z][A-Za-z0-9]*$/);
     }
   });
 });

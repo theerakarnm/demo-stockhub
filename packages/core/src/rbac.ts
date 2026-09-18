@@ -109,14 +109,68 @@ export const COST_KEYS: ReadonlySet<string> = new Set([
   'totalCogs',
 ]);
 
-export const stripCost = <T>(payload: T): T => {
-  if (Array.isArray(payload)) return payload.map((item) => stripCost(item)) as T;
+/**
+ * Tier pricing keys follow the same lifecycle as cost keys: a response that
+ * names them disappears for roles without `price_tier:read` (sales sees them,
+ * stock_staff does not).
+ */
+export const PRICE_TIER_KEYS: ReadonlySet<string> = new Set([
+  'priceTierId',
+  'priceTierCode',
+  'priceTierName',
+  'tierPrices',
+  'priceSource',
+]);
+
+/** One redaction policy: a permission gates a set of payload keys. */
+export interface FieldPolicy {
+  permission: Permission;
+  keys: ReadonlySet<string>;
+}
+
+/**
+ * Every key set and the permission that guards it, in one table.
+ *
+ * A reviewer reads the whole redaction policy from this list; a new field
+ * category means adding one entry here plus its key set, not a new middleware.
+ */
+export const FIELD_POLICIES: readonly FieldPolicy[] = [
+  { permission: 'cost:read', keys: COST_KEYS },
+  { permission: 'price_tier:read', keys: PRICE_TIER_KEYS },
+];
+
+/** Union of the keys of every policy whose permission the role lacks. */
+export const blockedKeysFor = (role: Role): ReadonlySet<string> => {
+  const blocked = new Set<string>();
+  for (const policy of FIELD_POLICIES) {
+    if (can(role, policy.permission)) continue;
+    for (const key of policy.keys) blocked.add(key);
+  }
+  return blocked;
+};
+
+/**
+ * Strip every blocked key from an arbitrary payload shape, at any depth.
+ *
+ * Primitives, `null` and `Date` instances pass through untouched; a `Date` is
+ * an object whose entries list is empty, so it must be short-circuited before
+ * the plain-object branch or it comes back as `{}`.
+ */
+export const stripKeys = <T>(payload: T, keys: ReadonlySet<string>): T => {
+  if (payload instanceof Date) return payload;
+  if (Array.isArray(payload)) return payload.map((item) => stripKeys(item, keys)) as T;
   if (payload === null || typeof payload !== 'object') return payload;
 
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
-    if (COST_KEYS.has(key)) continue;
-    out[key] = stripCost(value);
+    if (keys.has(key)) continue;
+    out[key] = stripKeys(value, keys);
   }
   return out as T;
 };
+
+/** Redact a payload for one role using the FIELD_POLICIES table. */
+export const redactForRole = <T>(role: Role, payload: T): T =>
+  stripKeys(payload, blockedKeysFor(role));
+
+export const stripCost = <T>(payload: T): T => stripKeys(payload, COST_KEYS);
