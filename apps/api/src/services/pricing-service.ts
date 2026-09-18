@@ -33,6 +33,7 @@ import {
   customerRepo,
   pricingRepo,
 } from '@stockhub/db';
+import { isUuid } from '../lib/uuid';
 import type {
   CustomerInput,
   CustomerView,
@@ -65,6 +66,18 @@ export const toTierView = (row: PriceTier) => ({
   isDefault: row.isDefault,
 });
 
+/**
+ * A malformed id can never exist, so answer the honest error code before the
+ * query turns Postgres' uuid cast failure into a 500.
+ */
+const requireUuidId = (
+  value: string,
+  code: 'not_found' | 'validation_error',
+  message: string,
+): void => {
+  if (!isUuid(value)) throw new StockHubError(code, message, { value });
+};
+
 /** The tier must exist INSIDE THIS ORG, otherwise the id came from somewhere else. */
 const requireTierOfOrg = async (
   exec: Parameters<typeof pricingRepo.listTiers>[0],
@@ -95,6 +108,7 @@ export const getCustomer = async (
   ctx: ServiceContext,
   customerId: CustomerId,
 ): Promise<CustomerView> => {
+  requireUuidId(customerId, 'not_found', 'ไม่พบลูกค้า');
   const row = await customerRepo.getCustomer(ctx.db(), { orgId: ctx.auth.orgId, customerId });
   if (!row) throw new StockHubError('not_found', 'ไม่พบลูกค้า', { customerId });
   return toCustomerView(row);
@@ -130,6 +144,7 @@ export const updateCustomer = async (
 ): Promise<CustomerView> => {
   const exec = ctx.db();
   const orgId = ctx.auth.orgId;
+  requireUuidId(customerId, 'not_found', 'ไม่พบลูกค้า');
   if (input.priceTierId) await requireTierOfOrg(exec, orgId, input.priceTierId);
 
   // Distinguish 'stay as is' (undefined) from 'clear it' (null).
@@ -182,6 +197,10 @@ export const putTierPrices = async (
   cells: readonly { variantId: string; price: number | null }[],
 ): Promise<PutTierPricesResult> => {
   const exec = ctx.db();
+  requireUuidId(priceTierId, 'validation_error', 'รหัสระดับราคาไม่ถูกต้อง');
+  for (const cell of cells) {
+    requireUuidId(cell.variantId, 'validation_error', 'รหัสสินค้าไม่ถูกต้อง');
+  }
   // Same tenant rule as the customer's tier: only a tier OF THIS ORG is writable.
   await requireTierOfOrg(exec, ctx.auth.orgId, priceTierId);
   return pricingRepo.upsertTierPrices(exec, {
@@ -218,8 +237,10 @@ export const resolvePrices = async (
   // another org (or an unknown id) is 404, not a silent fallback.
   let tierId: PriceTierId | undefined;
   if (input.priceTierId) {
+    requireUuidId(input.priceTierId, 'validation_error', 'รหัสระดับราคาไม่ถูกต้อง');
     tierId = asPriceTierId(input.priceTierId);
   } else if (input.customerId) {
+    requireUuidId(input.customerId, 'not_found', 'ไม่พบลูกค้า');
     const customer = await customerRepo.getCustomer(db, {
       orgId,
       customerId: asCustomerId(input.customerId),
@@ -228,6 +249,11 @@ export const resolvePrices = async (
       throw new StockHubError('not_found', 'ไม่พบลูกค้า', { customerId: input.customerId });
     }
     tierId = customer.priceTierId ? asPriceTierId(customer.priceTierId) : undefined;
+  }
+
+  // An id that cannot exist is an unknown variant: 404, not a database error.
+  for (const variantId of input.variantIds) {
+    requireUuidId(variantId, 'not_found', 'ไม่พบสินค้า');
   }
 
   const defaultTier = await pricingRepo.getDefaultTier(db, { orgId });
