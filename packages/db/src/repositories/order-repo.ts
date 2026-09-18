@@ -15,7 +15,7 @@ import {
   type OrgId,
   StockHubError,
 } from '@stockhub/core';
-import { and, asc, desc, eq, gte, isNotNull, notInArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNotNull, notInArray, sql } from 'drizzle-orm';
 import type { DbExecutor } from '../client';
 import {
   type NewOrder,
@@ -64,6 +64,28 @@ export const replaceOrderLines = async (
   if (params.lines.length > 0) {
     await exec.insert(orderLines).values([...params.lines]);
   }
+};
+
+/**
+ * The orders of one channel by platform order number - the read behind the
+ * import preview's duplicate detection: an external id that already exists here
+ * is shown as skipped instead of being deducted a second time.
+ */
+export const listOrdersByExternalIds = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId; channelId: ChannelId; externalIds: readonly string[] },
+): Promise<Order[]> => {
+  if (params.externalIds.length === 0) return [];
+  return exec
+    .select()
+    .from(orders)
+    .where(
+      and(
+        eq(orders.orgId, params.orgId),
+        eq(orders.channelId, params.channelId),
+        inArray(orders.externalOrderId, [...params.externalIds]),
+      ),
+    );
 };
 
 export interface ListOrdersQuery {

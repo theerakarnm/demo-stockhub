@@ -27,6 +27,7 @@ import type {
   HealthResponse,
   ImportBatch,
   ImportDetailResponse,
+  ImportPreviewGroups,
   InventoryQuery,
   InventoryResponse,
   MatchSkuInput,
@@ -1151,11 +1152,28 @@ export const mockApi = {
     if (!batch) throw notFound('ไฟล์นำเข้า');
     // Applied and failed batches have no preview payload left to show.
     const showPreview = batch.status === 'preview_ready' || batch.status === 'uploaded';
+    const orders = showPreview ? previewOrders : [];
+    const unmatched = showPreview ? mockUnmatched : [];
+    // Mirror the server grouping: cancelled goes to skipped, an order with an
+    // unmatched line waits in needsMatch, everything else will deduct.
+    const groups: ImportPreviewGroups = {
+      willDeduct: orders.filter(
+        (o) =>
+          o.status !== 'cancelled' &&
+          o.status !== 'returned' &&
+          !o.lines.some((l) => l.matchSource === 'unmatched'),
+      ),
+      needsMatch: orders.filter((o) => o.lines.some((l) => l.matchSource === 'unmatched')),
+      skipped: orders
+        .filter((o) => o.status === 'cancelled' || o.status === 'returned')
+        .map((order) => ({ order, reason: 'cancelled' as const })),
+    };
     return {
       batch,
-      orders: showPreview ? previewOrders : [],
+      orders,
       issues: showPreview ? previewIssues : [],
-      unmatched: showPreview ? mockUnmatched : [],
+      unmatched,
+      groups,
     };
   },
 

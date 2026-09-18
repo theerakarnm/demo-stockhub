@@ -6,21 +6,26 @@
  * file attached instead of a silent gap.
  */
 
-import {
-  type ChannelId,
-  type ImportBatchId,
-  type ImportStatus,
-  NotImplementedError,
-  type OrgId,
-  type ParseIssue,
-  type UserId,
+import type {
+  ChannelId,
+  ChannelKind,
+  ImportBatchId,
+  ImportStatus,
+  OrgId,
+  ParseIssue,
+  UserId,
 } from '@stockhub/core';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { DbExecutor } from '../client';
-import { type ImportBatch, importBatches } from '../schema';
+import { type ImportBatch, type ImportPreviewPayload, importBatches } from '../schema';
 
 export interface CreateBatchInput {
   orgId: OrgId;
+  /**
+   * Set by callers that generate the id BEFORE the insert, so the R2 object
+   * key can contain it. Defaults to the database's gen_random_uuid().
+   */
+  id?: ImportBatchId;
   channelId?: ChannelId;
   fileName: string;
   r2ObjectKey: string;
@@ -36,6 +41,7 @@ export const createBatch = async (
   const [row] = await exec
     .insert(importBatches)
     .values({
+      ...(input.id ? { id: input.id } : {}),
       orgId: input.orgId,
       channelId: input.channelId,
       fileName: input.fileName,
@@ -53,11 +59,18 @@ export const createBatch = async (
 
 export interface UpdateBatchInput {
   status?: ImportStatus;
+  channelId?: ChannelId;
+  /** Set once the adapter registry named the platform. */
+  detectedKind?: ChannelKind;
+  /** Why the detector picked the adapter, shown on the preview screen. */
+  detectionReason?: string;
   rowsRead?: number;
   ordersParsed?: number;
   issues?: ParseIssue[];
   errorMessage?: string;
   appliedAt?: Date;
+  /** The parsed preview payload. One write per batch, rebuilt by getImportPreview. */
+  preview?: ImportPreviewPayload | null;
 }
 
 /** Move a batch along its lifecycle. See IMPORT_STATUSES in @stockhub/core. */
@@ -67,6 +80,44 @@ export const updateBatch = async (
   patch: UpdateBatchInput,
 ): Promise<void> => {
   await exec.update(importBatches).set(patch).where(eq(importBatches.id, batchId));
+};
+
+/** The same row with the FOR UPDATE lock an apply transaction needs. */
+export const getBatchForUpdate = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId; batchId: ImportBatchId },
+): Promise<ImportBatch | undefined> => {
+  const [row] = await exec
+    .select()
+    .from(importBatches)
+    .where(and(eq(importBatches.orgId, params.orgId), eq(importBatches.id, params.batchId)))
+    .limit(1)
+    .for('update');
+  return row;
+};
+
+/**
+ * A previously APPLIED batch with the same file digest. The checksum alone is
+ * not an error: the shop may re-upload an unchanged file, so the caller only
+ * uses this to warn and to skip already-deducted orders in the preview.
+ */
+export const findAppliedBatchByChecksum = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId; checksum: string; excludeBatchId?: ImportBatchId },
+): Promise<ImportBatch | undefined> => {
+  const [row] = await exec
+    .select()
+    .from(importBatches)
+    .where(
+      and(
+        eq(importBatches.orgId, params.orgId),
+        eq(importBatches.checksum, params.checksum),
+        eq(importBatches.status, 'applied'),
+        params.excludeBatchId ? sql`${importBatches.id} <> ${params.excludeBatchId}` : undefined,
+      ),
+    )
+    .limit(1);
+  return row;
 };
 
 export const getBatch = async (
@@ -94,43 +145,16 @@ export const listBatches = async (
     .offset(params.offset ?? 0);
 
 /**
- * The preview screen payload: every parsed order line with its match state.
+ * The preview is NOT rebuilt from order rows here on purpose: until Apply,
+ * the parsed orders live in `import_batches.preview` (one jsonb write per
+ * batch), and the service layer maps them onto the wire contract. Reading
+ * order_lines instead would double the source of truth for the same preview.
  *
- * TODO(template): the parsed orders are already stored as `orders` +
- * `order_lines` rows with status 'pending' and match_source 'unmatched'.
- * Select them by import_batch_id, LEFT JOIN variants, and return the lines
- * grouped by order so the user can fix the unmatched ones.
+ * Applying is likewise owned by apps/api/src/services/import-service.ts, whose
+ * applyImport() runs the whole eight-step transaction (orders upsert, bundle
+ * expansion, FOR UPDATE lot locks, planMovements, ledger writes) on the
+ * caller's transaction.
  */
-export const getBatchPreview = async (
-  _exec: DbExecutor,
-  _params: { orgId: OrgId; batchId: ImportBatchId },
-): Promise<never> => {
-  throw new NotImplementedError('getBatchPreview');
-};
-
-/**
- * Apply a previewed batch: turn its orders into stock movements.
- *
- * TODO(template). This is THE transaction of the product:
- *   BEGIN
- *     set status = 'applying'
- *     for each order in the batch that still needs stock:
- *       expandBundles(lines)                       -- core/services/stock/bundle
- *       getOpenLotsForUpdate() per variant         -- locks the layers
- *       planMovements()                            -- core/services/stock/movement
- *       recordMovements()                          -- ledger + lots + consumptions
- *     set status = 'applied', applied_at = now()
- *   COMMIT
- * Any throw rolls the whole batch back, which is exactly what the shop owner
- * expects: a file is applied completely or not at all.
- */
-export const applyBatch = async (
-  _exec: DbExecutor,
-  _params: { orgId: OrgId; batchId: ImportBatchId; actorId: UserId },
-): Promise<void> => {
-  throw new NotImplementedError('applyBatch');
-};
-
 /** Count batches in one status - the dashboard's pending-imports counter. */
 export const countBatchesByStatus = async (
   exec: DbExecutor,

@@ -208,40 +208,59 @@ export interface Order {
 
 export interface ImportBatch {
   id: string;
+  orgId: string;
   channelId: string | null;
+  /** Display name of the channel, resolved server side when the batch has one. */
+  channelName?: string;
   channelKind: ChannelKind | null;
   fileName: string;
   fileSize: number;
-  /** R2 object key of the original upload. */
+  /** R2 object key of the original upload - the audit evidence. */
   objectKey: string;
   status: ImportStatus;
+  /** What the detector named from the file headers, null when nothing matched. */
+  detectedKind: ChannelKind | null;
   /** Why the detector picked this adapter, shown on the preview screen. */
   detectionReason?: string;
   rowsRead: number;
   ordersParsed: number;
+  /** Total parsed lines across every order of the batch. */
+  linesParsed: number;
   unmatchedCount: number;
   issueCount: number;
   uploadedAt: string;
   appliedAt: string | null;
-  uploadedBy: string;
+  uploadedBy?: string;
+  /** Display name resolved server side from uploadedBy. */
+  uploadedByName?: string;
+  /** Set when status === 'failed'. */
+  errorMessage?: string;
 }
 
 export interface PreviewOrderLine {
   platformSku: string;
   platformProductName: string;
+  /** Shopee "ชื่อตัวเลือก" / Lazada variation text, when the export has one. */
+  variationName?: string;
   quantity: number;
   unitPrice: MoneyOnWire;
   discount: MoneyOnWire;
-  /** null when the line is still unmatched. */
-  variantId: string | null;
-  matchedSku: string | null;
+  /** quantity * unitPrice - discount, computed by the API. */
+  lineTotal: MoneyOnWire;
   matchSource: MatchSource;
+  /** Absent while matchSource is 'unmatched'. */
+  variantId?: string;
+  variantSku?: string;
+  variantName?: string;
 }
 
 export interface PreviewOrder {
   externalOrderId: string;
+  /** Kind of the channel the batch imports into, null before detection. */
+  channelKind: ChannelKind | null;
   status: OrderStatus;
   orderedAt: string;
+  shippedAt?: string;
   buyerName?: string;
   grandTotal: MoneyOnWire;
   lines: PreviewOrderLine[];
@@ -256,12 +275,43 @@ export interface UnmatchedSku {
   suggestions: { variantId: string; sku: string; name: string; score: number }[];
 }
 
+/** Why an order the file describes will not move stock on apply. */
+export type PreviewSkipReason = 'cancelled' | 'already_imported';
+
+/** One order of the preview's skipped bucket, with the reason it is skipped. */
+export interface PreviewSkippedOrder {
+  order: PreviewOrder;
+  reason: PreviewSkipReason;
+}
+
+/**
+ * The three buckets the preview screen shows, straight from the brief:
+ * ตัดได้ (will deduct), ติดปัญหา SKU (needs a match decision), ถูกข้าม (skipped).
+ */
+export interface ImportPreviewGroups {
+  /** Every line matched, not cancelled, never imported before. */
+  willDeduct: PreviewOrder[];
+  /** At least one line still unmatched, grouped with match suggestions. */
+  needsMatch: PreviewOrder[];
+  /** Cancelled orders, and orders the org already imported through any file. */
+  skipped: PreviewSkippedOrder[];
+}
+
 /** Body of GET /api/v1/imports/:id - everything the preview screen needs. */
 export interface ImportPreviewResponse {
   batch: ImportBatch;
   orders: PreviewOrder[];
   issues: ParseIssueView[];
   unmatched: UnmatchedSku[];
+  groups: ImportPreviewGroups;
+}
+
+/** Body of POST /api/v1/imports/:id/match. */
+export interface MatchSkuResult {
+  /** Lines of THIS batch that flipped from unmatched to matched. */
+  linesUpdated: number;
+  /** Distinct platform SKUs still waiting for a decision after this save. */
+  unmatchedRemaining: number;
 }
 
 export interface ApplyImportResult {

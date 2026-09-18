@@ -20,7 +20,7 @@ import type { ImportBatch } from '@/lib/api-types';
 import { buildSampleImportFile } from '@/lib/mock-data';
 import { useApi, useMutation } from '@/lib/use-api';
 import { IMPORTABLE_CHANNEL_KINDS } from '@stockhub/core';
-import { ArrowLeft, RotateCcw, ScanSearch } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, RotateCcw, ScanSearch } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 
@@ -164,7 +164,17 @@ export default function NewImportPage() {
           muted={!batch}
         >
           {batch ? (
-            <DetectionCard batch={batch} />
+            <>
+              <DetectionCard batch={batch} />
+              {detailQuery.data?.issues.some((issue) => issue.code === 'duplicate_checksum') ? (
+                <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" aria-hidden />
+                  <p className="text-xs text-amber-800">
+                    ไฟล์นี้เคยถูกนำเข้าแล้ว (ตรวจจากลายนิ้วมือไฟล์) ออเดอร์ที่เคยบันทึกไว้จะถูกข้าม และจะไม่ตัดสต็อกซ้ำ
+                  </p>
+                </div>
+              ) : null}
+            </>
           ) : (
             <p className="text-xs text-slate-500">
               ยังไม่มีผลการอ่านไฟล์ เลือกไฟล์ในขั้นตอนที่ 2 แล้วกด อ่านไฟล์และดูตัวอย่าง
