@@ -24,6 +24,8 @@ import {
   Package,
   Settings,
   ShoppingCart,
+  Tags,
+  Users,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -45,6 +47,14 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/imports', label: 'นำเข้าออเดอร์', icon: FileSpreadsheet, permission: 'import:run' },
   { href: '/orders', label: 'ออเดอร์', icon: ShoppingCart, permission: 'order:read' },
   { href: '/movements', label: 'ความเคลื่อนไหวสต็อก', icon: ArrowLeftRight },
+  { href: '/customers', label: 'ลูกค้า', icon: Users, permission: 'customer:read' },
+  {
+    href: '/settings/price-tiers',
+    label: 'ระดับราคา',
+    icon: Tags,
+    permission: 'price_tier:read',
+    match: ['/settings/price-tiers'],
+  },
   {
     href: '/reports/cogs',
     label: 'รายงานต้นทุน',
