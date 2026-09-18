@@ -64,8 +64,12 @@ jobs:
         run: |
           bun run db:seed
           bun run db:seed
-      - name: Database guard integration tests
-        run: bun test packages/db
+      - name: Database-backed integration tests (db + api)
+        run: |
+          bun test packages/db apps/api 2>&1 | tee test.log
+          if grep -qE "^ *[1-9][0-9]* skip" test.log; then
+            echo "DB-gated suites skipped although DATABASE_URL is set"; exit 1
+          fi
 
   build:
     name: Web build + Workers dry-run
