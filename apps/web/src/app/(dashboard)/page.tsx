@@ -31,15 +31,17 @@ import {
   buttonClass,
 } from '@/components/ui';
 import { api } from '@/lib/api-client';
-import { baht, formatRelative, qty } from '@/lib/format';
+import { baht, formatDate, formatRelative, qty } from '@/lib/format';
 import { useApi } from '@/lib/use-api';
 import {
   AlertTriangle,
   ArrowRight,
+  BarChart3,
   Boxes,
   FileSpreadsheet,
   Layers,
   Link2Off,
+  Scale,
   ShoppingCart,
   Wallet,
 } from 'lucide-react';
@@ -54,6 +56,9 @@ export default function DashboardPage() {
   // because the API strips the cost fields per role.
   const summary = useApi(() => api.getDashboardSummary(), [role]);
   const movements = useApi(() => api.getMovements({ limit: RECENT_MOVEMENT_LIMIT }), [role]);
+  // Report sections: the last seven Bangkok days, today included.
+  const channelSales = useApi(() => api.getChannelSalesReport({ days: 7 }), [role]);
+  const variance = useApi(() => api.getVarianceReport({ days: 7 }), [role]);
 
   const data = summary.data;
   const loading = summary.loading && !data;
@@ -242,6 +247,130 @@ export default function DashboardPage() {
                 </li>
               ))}
             </ul>
+          ) : null}
+        </Card>
+      </div>
+
+      {/* Report sections: what sold where, and what explains the drift. */}
+      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-5">
+        <Card className="xl:col-span-3">
+          <CardHeader
+            title="ยอดขาย 7 วันล่าสุดตามช่องทาง"
+            description="รวมออเดอร์จากทุกสถานะที่ยังไม่ยกเลิกหรือคืนสินค้า"
+            action={
+              <Link
+                href="/orders"
+                className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:underline"
+              >
+                ดูออเดอร์ทั้งหมด
+                <ArrowRight className="size-3" aria-hidden />
+              </Link>
+            }
+          />
+          {channelSales.loading && !channelSales.data ? <TableSkeleton rows={5} cols={4} /> : null}
+          {channelSales.error ? (
+            <ErrorState error={channelSales.error} onRetry={channelSales.reload} />
+          ) : null}
+          {channelSales.data && channelSales.data.rows.length === 0 ? (
+            <EmptyState
+              icon={<BarChart3 className="size-5" aria-hidden />}
+              title="ยังไม่มียอดขายในช่วง 7 วัน"
+              description="เมื่อมีออเดอร์เข้ามาในช่วงนี้ ยอดขายรายช่องทางจะแสดงที่นี่"
+            />
+          ) : null}
+          {channelSales.data && channelSales.data.rows.length > 0 ? (
+            <TableWrap>
+              <Table>
+                <Thead>
+                  <Tr>
+                    <Th>ช่องทาง</Th>
+                    <Th numeric>ออเดอร์</Th>
+                    <Th numeric>หน่วยที่ขาย</Th>
+                    <Th numeric>ยอดขาย</Th>
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {channelSales.data.rows.map((row) => (
+                    <Tr key={row.channelId}>
+                      <Td>
+                        <ChannelBadge kind={row.kind} />
+                        <span className="ml-2 max-w-[14rem] truncate align-middle text-slate-900">
+                          {row.channelName}
+                        </span>
+                      </Td>
+                      <Td numeric>{qty(row.orders)}</Td>
+                      <Td numeric>{qty(row.unitsSold)}</Td>
+                      <Td numeric>{baht(row.revenue)}</Td>
+                    </Tr>
+                  ))}
+                </Tbody>
+              </Table>
+            </TableWrap>
+          ) : null}
+        </Card>
+
+        <Card className="xl:col-span-2">
+          <CardHeader
+            title="สาเหตุความคลาดเคลื่อนล่าสุด"
+            description="สต็อกที่เปลี่ยนนอกเหนือจากการรับเข้าและขายออก"
+            action={
+              <Link
+                href="/movements"
+                className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:underline"
+              >
+                ดูทั้งหมด
+                <ArrowRight className="size-3" aria-hidden />
+              </Link>
+            }
+          />
+          {variance.loading && !variance.data ? <TableSkeleton rows={5} cols={3} /> : null}
+          {variance.error ? <ErrorState error={variance.error} onRetry={variance.reload} /> : null}
+          {variance.data && variance.data.rows.length === 0 ? (
+            <EmptyState
+              icon={<Scale className="size-5" aria-hidden />}
+              title="ไม่มีความคลาดเคลื่อนในช่วง 7 วัน"
+              description="การปรับสต็อก ยกเลิก และรับคืนจะถูกอธิบายไว้ที่นี่"
+            />
+          ) : null}
+          {variance.data && variance.data.rows.length > 0 ? (
+            <TableWrap>
+              <Table>
+                <Thead>
+                  <Tr>
+                    <Th>วันที่ / สินค้า</Th>
+                    <Th>สาเหตุ</Th>
+                    <Th numeric>ผลรวม</Th>
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {variance.data.rows.slice(0, 8).map((row) => (
+                    <Tr key={`${row.variantId}-${row.day}`}>
+                      <Td>
+                        <p className="max-w-[13rem] truncate text-slate-900">{row.name}</p>
+                        <p className="mt-0.5 text-xs text-slate-500">
+                          <span className="font-mono">{row.sku}</span>
+                          <span aria-hidden> / </span>
+                          {formatDate(new Date(`${row.day}T00:00:00+07:00`).toISOString())}
+                        </p>
+                      </Td>
+                      <Td>
+                        <div className="flex flex-wrap gap-1">
+                          {row.byReason.map((reason) => (
+                            <span key={reason.reason} className="inline-flex items-center gap-1">
+                              <MovementReasonBadge reason={reason.reason} />
+                              <QtyDelta value={reason.qtyDelta} className="text-xs" />
+                            </span>
+                          ))}
+                        </div>
+                      </Td>
+                      <Td numeric>
+                        <QtyDelta value={row.qtyDelta} />
+                      </Td>
+                    </Tr>
+                  ))}
+                </Tbody>
+              </Table>
+            </TableWrap>
           ) : null}
         </Card>
       </div>

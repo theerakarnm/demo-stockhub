@@ -16,6 +16,9 @@ import { ApiError } from './api-error';
 import type {
   ApplyImportResult,
   Channel,
+  ChannelSalesQuery,
+  ChannelSalesReport,
+  ChannelSalesRow,
   CogsQuery,
   CogsReportResponse,
   CogsReportRow,
@@ -42,6 +45,8 @@ import type {
   StockLotRow,
   StockRow,
   UnmatchedSku,
+  VarianceQuery,
+  VarianceReport,
   VariantDetailResponse,
   VariantSummary,
 } from './api-types';
@@ -1285,6 +1290,92 @@ export const mockApi = {
   // so these only need to answer with the same shape the API would.
   cancelOrder: (_id: string, _reason: string): Movement[] => [],
   returnOrder: (_id: string, _lines: ReturnOrderLineInput[]): Movement[] => [],
+
+  channelSales: (query: ChannelSalesQuery = {}): ChannelSalesReport => {
+    const days = query.days ?? 7;
+    const rows: ChannelSalesRow[] = [
+      {
+        channelId: 'ch_shopee_main',
+        channelName: 'Shopee - ร้านหลัก',
+        kind: 'shopee',
+        orders: 14,
+        unitsSold: 22,
+        revenue: 412_300,
+      },
+      {
+        channelId: 'ch_lazada_main',
+        channelName: 'Lazada - ร้านหลัก',
+        kind: 'lazada',
+        orders: 9,
+        unitsSold: 15,
+        revenue: 296_800,
+      },
+      {
+        channelId: 'ch_tiktok_main',
+        channelName: 'TikTok Shop - ร้านหลัก',
+        kind: 'tiktok',
+        orders: 6,
+        unitsSold: 9,
+        revenue: 158_400,
+      },
+      {
+        channelId: 'ch_pos_shop',
+        channelName: 'หน้าร้าน (POS)',
+        kind: 'pos',
+        orders: 11,
+        unitsSold: 18,
+        revenue: 264_500,
+      },
+    ];
+    return gate({
+      days,
+      from: new Date(Date.now() - days * 86_400_000).toISOString(),
+      to: new Date().toISOString(),
+      rows,
+      totals: rows.reduce(
+        (acc, row) => ({
+          orders: acc.orders + row.orders,
+          unitsSold: acc.unitsSold + row.unitsSold,
+          revenue: acc.revenue + row.revenue,
+        }),
+        { orders: 0, unitsSold: 0, revenue: 0 },
+      ),
+    });
+  },
+
+  variance: (query: VarianceQuery = {}): VarianceReport => {
+    const days = query.days ?? 7;
+    const today = new Date().toISOString().slice(0, 10);
+    return {
+      days,
+      from: new Date(Date.now() - days * 86_400_000).toISOString(),
+      to: new Date().toISOString(),
+      rows: [
+        {
+          variantId: 'var_sickle_m',
+          sku: 'KNF-001',
+          name: 'มีดพร้าฟันหญ้า',
+          day: today,
+          qtyDelta: -3,
+          movements: 1,
+          byReason: [{ reason: 'adjust_out', qtyDelta: -3, movements: 1 }],
+        },
+        {
+          variantId: 'var_glove_pair',
+          sku: 'GLV-PR-01',
+          name: 'ถุงมือทำสวนเคลือบยาง',
+          day: today,
+          qtyDelta: 2,
+          movements: 2,
+          byReason: [
+            { reason: 'return_in', qtyDelta: 2, movements: 1 },
+            { reason: 'cancel_restore', qtyDelta: 2, movements: 1 },
+            { reason: 'adjust_out', qtyDelta: -2, movements: 1 },
+          ],
+        },
+      ],
+    };
+  },
 
   cogsReport: (query: CogsQuery = {}): CogsReportResponse => {
     const { role } = getDemoIdentity();

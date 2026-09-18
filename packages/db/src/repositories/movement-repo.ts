@@ -8,12 +8,14 @@
 
 import {
   type LotConsumption,
+  MOVEMENT_REASONS,
   type MovementReason,
   type OrgId,
   type PlannedMovement,
   type UserId,
   type VariantId,
   asStockLotId,
+  asVariantId,
   satang,
 } from '@stockhub/core';
 import { and, asc, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
@@ -402,5 +404,79 @@ export const sumSalesByChannelSince = async (
     name: row.name,
     unitsSold: Number(row.unitsSold),
     revenue: Number(row.revenue),
+  }));
+};
+
+/**
+ * Reasons that explain a balance change outside the normal buy/sell loop -
+ * the variance definition of the wave 3 plan (decision D4): every movement
+ * reason that is neither purchase_in nor sale_out.
+ */
+export const VARIANCE_REASONS: readonly MovementReason[] = MOVEMENT_REASONS.filter(
+  (reason) => reason !== 'purchase_in' && reason !== 'sale_out',
+);
+
+export interface VarianceGroupRow {
+  variantId: VariantId;
+  sku: string;
+  productName: string;
+  variantName: string | null;
+  /** Calendar day in Asia/Bangkok, 'YYYY-MM-DD'. */
+  day: string;
+  reason: MovementReason;
+  /** Signed sum of the day's qty_delta for this variant + reason. */
+  qtyDelta: number;
+  movements: number;
+}
+
+/**
+ * Variance groups (variant x day x reason), newest and biggest first.
+ *
+ * The caller merges the reason groups into one row per (variant, day) in
+ * memory. The limit bounds the work for a busy ledger; 500 groups is far past
+ * what a demo tenant produces in a year.
+ */
+export const listVarianceGroups = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId; from: Date; limit?: number },
+): Promise<VarianceGroupRow[]> => {
+  const dayExpr = sql<string>`to_char(${stockMovements.occurredAt} at time zone 'Asia/Bangkok', 'YYYY-MM-DD')`;
+  const day = dayExpr.as('day');
+  const rows = await exec
+    .select({
+      variantId: stockMovements.variantId,
+      sku: variants.sku,
+      productName: products.name,
+      variantName: variants.name,
+      day,
+      reason: stockMovements.reason,
+      qtyDelta: sql<number>`sum(${stockMovements.qtyDelta})::int`.as('qty_delta'),
+      movements: sql<number>`count(*)::int`.as('movements'),
+    })
+    .from(stockMovements)
+    .innerJoin(variants, eq(variants.id, stockMovements.variantId))
+    .innerJoin(products, eq(products.id, variants.productId))
+    .where(
+      and(
+        eq(stockMovements.orgId, params.orgId),
+        inArray(stockMovements.reason, [...VARIANCE_REASONS]),
+        gte(stockMovements.occurredAt, params.from),
+      ),
+    )
+    .groupBy(
+      stockMovements.variantId,
+      variants.sku,
+      products.name,
+      variants.name,
+      dayExpr,
+      stockMovements.reason,
+    )
+    .orderBy(desc(dayExpr), sql`abs(sum(${stockMovements.qtyDelta})) desc`)
+    .limit(params.limit ?? 500);
+  return rows.map((row) => ({
+    ...row,
+    variantId: asVariantId(row.variantId),
+    qtyDelta: Number(row.qtyDelta),
+    movements: Number(row.movements),
   }));
 };

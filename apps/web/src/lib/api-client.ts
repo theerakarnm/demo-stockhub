@@ -11,6 +11,8 @@ import { demo, request, withQuery } from './api-core';
 import type {
   ApplyImportResult,
   Channel,
+  ChannelSalesQuery,
+  ChannelSalesReport,
   CogsQuery,
   CogsReportResponse,
   CreateImportInput,
@@ -32,6 +34,8 @@ import type {
   OrdersResponse,
   ReceiveStockInput,
   ReturnOrderLineInput,
+  VarianceQuery,
+  VarianceReport,
   VariantDetailResponse,
 } from './api-types';
 import { mockApi } from './mock-data';
@@ -193,6 +197,20 @@ export const api = {
           method: 'POST',
           body: { lines },
         }),
+    ),
+
+  /** GET /api/v1/reports/channel-sales - net sales per channel from orders. */
+  getChannelSalesReport: (query: ChannelSalesQuery = {}): Promise<ChannelSalesReport> =>
+    demo(
+      () => mockApi.channelSales(query),
+      () => request<ChannelSalesReport>(withQuery('/api/v1/reports/channel-sales', { ...query })),
+    ),
+
+  /** GET /api/v1/reports/variance - non-trade balance changes per variant and day. */
+  getVarianceReport: (query: VarianceQuery = {}): Promise<VarianceReport> =>
+    demo(
+      () => mockApi.variance(query),
+      () => request<VarianceReport>(withQuery('/api/v1/reports/variance', { ...query })),
     ),
 
   /** GET /api/v1/reports/cogs - 403 for roles without cost:read. */

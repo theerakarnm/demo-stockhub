@@ -439,6 +439,69 @@ export interface ReturnOrderLineInput {
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/v1/reports/channel-sales - net sales per channel from orders
+// ---------------------------------------------------------------------------
+
+/** One row of GET /reports/channel-sales. Revenue is selling money, never cost. */
+export interface ChannelSalesRow {
+  channelId: string;
+  channelName: string;
+  kind: ChannelKind;
+  orders: number;
+  unitsSold: number;
+  revenue: MoneyAmount;
+}
+
+export interface ChannelSalesReport {
+  days: number;
+  /** Start of the window: Bangkok midnight, (days - 1) days before today. */
+  from: IsoDateTime;
+  to: IsoDateTime;
+  rows: ChannelSalesRow[];
+  totals: { orders: number; unitsSold: number; revenue: MoneyAmount };
+}
+
+export interface ChannelSalesQuery {
+  /** Window in days, today included. */
+  days?: number;
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/reports/variance - non-trade balance changes per variant and day
+// ---------------------------------------------------------------------------
+
+/** One reason's share of a variant's variance on one day. */
+export interface VarianceReasonTotal {
+  reason: MovementReason;
+  /** Signed: positive restored, negative lost. */
+  qtyDelta: number;
+  movements: number;
+}
+
+export interface VarianceRow {
+  variantId: string;
+  sku: string;
+  name: string;
+  /** Calendar day in Asia/Bangkok, 'YYYY-MM-DD'. */
+  day: string;
+  qtyDelta: number;
+  movements: number;
+  byReason: VarianceReasonTotal[];
+}
+
+export interface VarianceReport {
+  days: number;
+  from: IsoDateTime;
+  to: IsoDateTime;
+  rows: VarianceRow[];
+}
+
+export interface VarianceQuery {
+  /** Window in days, today included. */
+  days?: number;
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/v1/reports/cogs - requires the `cost:read` permission
 // ---------------------------------------------------------------------------
 
