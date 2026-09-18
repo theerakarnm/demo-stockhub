@@ -23,6 +23,10 @@ export const PERMISSIONS = [
   'channel:write',
   'report:read',
   'user:manage',
+  'customer:read', // list and search customers
+  'customer:write', // create / edit a customer and set their price tier
+  'price_tier:read', // see tier prices on a product or a bill
+  'price_tier:write', // edit the price matrix
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -40,11 +44,22 @@ const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'product:write',
     'channel:write',
     'report:read',
+    'customer:read',
+    'customer:write',
+    'price_tier:read',
+    'price_tier:write',
   ],
-  // Warehouse staff move goods but must not see what the goods cost.
+  // Warehouse staff move goods but must not see what the goods cost, nor tier pricing.
   stock_staff: ['stock:read', 'stock:adjust', 'import:run', 'order:read'],
-  // Shop floor sells at the selling price and must not see margin.
-  sales: ['stock:read', 'order:create', 'order:read'],
+  // Shop floor sells at the tier price and must not see margin.
+  sales: [
+    'stock:read',
+    'order:create',
+    'order:read',
+    'customer:read',
+    'customer:write',
+    'price_tier:read',
+  ],
 };
 
 export const can = (role: Role, permission: Permission): boolean =>
@@ -66,7 +81,7 @@ export const ROLE_LABELS: Record<Role, { en: string; th: string }> = {
  * Add a key here the moment you add a cost field to a response type, and keep
  * the API route calling this - that is the single choke point for the feature.
  */
-const COST_KEYS = new Set([
+export const COST_KEYS: ReadonlySet<string> = new Set([
   'unitCost',
   'avgUnitCost',
   'totalCost',
@@ -84,6 +99,14 @@ const COST_KEYS = new Set([
   'stockValue',
   'stockValueTotal',
   'grossMargin',
+  // FIFO slices of a movement, each carrying the lot cost of the slice
+  'consumptions',
+  // Ledger money on a movement line and the movement total
+  'lineCost',
+  'costTotal',
+  // Report totals already named in apps/web/src/lib/api-types.ts
+  'grossProfit',
+  'totalCogs',
 ]);
 
 export const stripCost = <T>(payload: T): T => {
