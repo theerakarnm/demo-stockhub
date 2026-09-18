@@ -15,7 +15,7 @@ import {
   type ParseIssue,
   type UserId,
 } from '@stockhub/core';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import type { DbExecutor } from '../client';
 import { type ImportBatch, importBatches } from '../schema';
 
@@ -129,4 +129,16 @@ export const applyBatch = async (
   _params: { orgId: OrgId; batchId: ImportBatchId; actorId: UserId },
 ): Promise<void> => {
   throw new NotImplementedError('applyBatch');
+};
+
+/** Count batches in one status - the dashboard's pending-imports counter. */
+export const countBatchesByStatus = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId; status: ImportStatus },
+): Promise<number> => {
+  const [row] = await exec
+    .select({ total: sql<number>`count(*)::int`.as('total') })
+    .from(importBatches)
+    .where(and(eq(importBatches.orgId, params.orgId), eq(importBatches.status, params.status)));
+  return Number(row?.total ?? 0);
 };

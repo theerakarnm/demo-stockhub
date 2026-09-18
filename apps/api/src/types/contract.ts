@@ -275,6 +275,7 @@ export interface CogsReportRow {
   date: string;
   channelId: string;
   channelName: string;
+  kind: ChannelKind;
   unitsSold: number;
   revenue: MoneyOnWire;
   /** cost field */
@@ -295,6 +296,60 @@ export interface CogsReport {
     /** cost field */
     margin?: MoneyOnWire;
   };
+}
+
+/**
+ * One row of GET /reports/channel-sales: net sales of one channel over the
+ * window. Revenue is selling money, not cost, so no field here is cost-gated.
+ */
+export interface ChannelSalesRow {
+  channelId: string;
+  channelName: string;
+  kind: ChannelKind;
+  orders: number;
+  unitsSold: number;
+  revenue: MoneyOnWire;
+}
+
+export interface ChannelSalesReport {
+  days: number;
+  /** Start of the window: Bangkok midnight, (days - 1) days before today. */
+  from: string;
+  to: string;
+  rows: ChannelSalesRow[];
+  totals: { orders: number; unitsSold: number; revenue: MoneyOnWire };
+}
+
+/** One reason's share of a variant's variance on one day. */
+export interface VarianceReasonTotal {
+  reason: MovementReason;
+  /** Signed: positive restored, negative lost. */
+  qtyDelta: number;
+  movements: number;
+}
+
+/**
+ * One row of GET /reports/variance: why the balance of one variant moved on
+ * one day for reasons other than buying in or selling out (decision D4 of the
+ * wave 3 plan). Quantities only - stock staff can read every field.
+ */
+export interface VarianceRow {
+  variantId: string;
+  sku: string;
+  name: string;
+  /** Calendar day in Asia/Bangkok, 'YYYY-MM-DD'. */
+  day: string;
+  /** Signed sum over the day's variance movements. */
+  qtyDelta: number;
+  movements: number;
+  byReason: VarianceReasonTotal[];
+}
+
+export interface VarianceReport {
+  days: number;
+  from: string;
+  to: string;
+  rows: VarianceRow[];
 }
 
 /** Envelope for every cursor paginated list endpoint. */

@@ -15,7 +15,7 @@ import {
   type OrgId,
   StockHubError,
 } from '@stockhub/core';
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, isNotNull, notInArray, sql } from 'drizzle-orm';
 import type { DbExecutor } from '../client';
 import {
   type NewOrder,
@@ -166,4 +166,79 @@ export const setOrderStatus = async (
     })
     .where(and(eq(orders.orgId, params.orgId), eq(orders.id, params.orderId)));
   return { previous: current.status };
+};
+
+// ---------------------------------------------------------------------------
+// Report aggregates (read only).
+// ---------------------------------------------------------------------------
+
+/** Statuses that cancel a sale out of the net sales reports. */
+const NOT_A_SALE: readonly OrderStatus[] = ['cancelled', 'returned'];
+
+export interface ChannelSalesRow {
+  channelId: string;
+  /** Distinct orders behind the row. */
+  orders: number;
+  unitsSold: number;
+  /** Sum of qty * unit_price - discount over the channel's lines, in satang. */
+  revenue: number;
+}
+
+/**
+ * Net sales per channel straight from orders + order lines.
+ *
+ * Cancelled and returned orders are excluded: they are not sales. Lines whose
+ * variant is still unmatched are excluded too - they never deduct stock, so
+ * counting them here would make this report disagree with the movement ledger,
+ * which is the exact data drift StockHub exists to kill.
+ */
+export const sumChannelSales = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId; from: Date },
+): Promise<ChannelSalesRow[]> => {
+  const rows = await exec
+    .select({
+      channelId: orders.channelId,
+      orders: sql<number>`count(distinct ${orders.id})::int`.as('orders'),
+      unitsSold: sql<number>`coalesce(sum(${orderLines.qty}), 0)::int`.as('units_sold'),
+      revenue:
+        sql<number>`coalesce(sum(${orderLines.qty} * ${orderLines.unitPrice} - ${orderLines.discount}), 0)::bigint`.as(
+          'revenue',
+        ),
+    })
+    .from(orders)
+    .innerJoin(orderLines, eq(orderLines.orderId, orders.id))
+    .where(
+      and(
+        eq(orders.orgId, params.orgId),
+        gte(orders.orderedAt, params.from),
+        notInArray(orders.status, [...NOT_A_SALE]),
+        isNotNull(orderLines.variantId),
+      ),
+    )
+    .groupBy(orders.channelId);
+  return rows.map((row) => ({
+    channelId: row.channelId,
+    orders: Number(row.orders),
+    unitsSold: Number(row.unitsSold),
+    revenue: Number(row.revenue),
+  }));
+};
+
+/**
+ * Distinct platform SKUs still waiting for a manual match - the work queue
+ * counter on the dashboard. Order lines keep their platform SKU after the
+ * order is stored, so this covers every tenant-wide unmatched line.
+ */
+export const countDistinctUnmatchedSkus = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId },
+): Promise<number> => {
+  const [row] = await exec
+    .select({
+      skus: sql<number>`count(distinct ${orderLines.platformSku})::int`.as('skus'),
+    })
+    .from(orderLines)
+    .where(and(eq(orderLines.orgId, params.orgId), eq(orderLines.matchSource, 'unmatched')));
+  return Number(row?.skus ?? 0);
 };

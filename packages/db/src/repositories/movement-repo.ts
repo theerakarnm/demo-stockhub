@@ -8,17 +8,26 @@
 
 import {
   type LotConsumption,
+  MOVEMENT_REASONS,
   type MovementReason,
   type OrgId,
   type PlannedMovement,
   type UserId,
   type VariantId,
   asStockLotId,
+  asVariantId,
   satang,
 } from '@stockhub/core';
 import { and, asc, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import type { DbExecutor } from '../client';
-import { movementLotConsumptions, products, stockLots, stockMovements, variants } from '../schema';
+import {
+  channels,
+  movementLotConsumptions,
+  products,
+  stockLots,
+  stockMovements,
+  variants,
+} from '../schema';
 import { applyLotDeltas } from './inventory-repo';
 
 export interface RecordMovementsInput {
@@ -310,4 +319,230 @@ export const listMovementsForOrder = async (
   }
 
   return rows.map((row) => ({ ...row, consumptions: byMovement.get(row.id) ?? [] }));
+};
+
+// ---------------------------------------------------------------------------
+// Report aggregates (read only).
+//
+// Every number a dashboard or report shows is computed HERE, from the same
+// ledger rows the FIFO engine wrote. No screen may recompute stock numbers
+// from another source - that is how the Excel drift started.
+//
+// `since`/`from`/`to` boundaries are UTC instants of Bangkok midnights, built
+// by report-service so the SQL day buckets (to_char ... at time zone
+// 'Asia/Bangkok') and the window edges can never disagree.
+// ---------------------------------------------------------------------------
+
+/** Units sold (sale_out) since an instant, whole org. Signed positive. */
+export const sumUnitsSoldSince = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId; since: Date },
+): Promise<number> => {
+  const [row] = await exec
+    .select({
+      units: sql<number>`coalesce(sum(-${stockMovements.qtyDelta}), 0)::int`.as('units'),
+    })
+    .from(stockMovements)
+    .where(
+      and(
+        eq(stockMovements.orgId, params.orgId),
+        eq(stockMovements.reason, 'sale_out'),
+        gte(stockMovements.occurredAt, params.since),
+      ),
+    );
+  return Number(row?.units ?? 0);
+};
+
+export interface ChannelSalesTodayRow {
+  channelId: string;
+  kind: (typeof channels.$inferSelect)['kind'];
+  name: string;
+  unitsSold: number;
+  /** Seller revenue in satang, from the order lines the movement came from. */
+  revenue: number;
+}
+
+/**
+ * Today's sale_out per channel: units from the ledger, revenue from the order
+ * lines behind each movement. The per-movement scalar subquery groups by
+ * (order_id, variant_id), so two lines of one order sharing a variant cannot
+ * double count, and it keeps the units/revenue join from fanning out.
+ */
+export const sumSalesByChannelSince = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId; since: Date },
+): Promise<ChannelSalesTodayRow[]> => {
+  // Outer references stay table-qualified so the correlation cannot drift if
+  // this query ever loses its join (a bare name would resolve to ol.*).
+  const revenuePerMovement = sql`(
+    select coalesce(sum(ol.qty * ol.unit_price - ol.discount), 0)
+    from order_lines ol
+    where ol.order_id = stock_movements.order_id
+      and ol.variant_id = stock_movements.variant_id
+  )`;
+  const rows = await exec
+    .select({
+      channelId: sql<string>`${stockMovements.channelId}`.as('channel_id'),
+      kind: channels.kind,
+      name: channels.name,
+      unitsSold: sql<number>`sum(-${stockMovements.qtyDelta})::int`.as('units_sold'),
+      revenue: sql<number>`coalesce(sum(${revenuePerMovement}), 0)::bigint`.as('revenue'),
+    })
+    .from(stockMovements)
+    .innerJoin(channels, eq(channels.id, stockMovements.channelId))
+    .where(
+      and(
+        eq(stockMovements.orgId, params.orgId),
+        eq(stockMovements.reason, 'sale_out'),
+        gte(stockMovements.occurredAt, params.since),
+      ),
+    )
+    .groupBy(stockMovements.channelId, channels.kind, channels.name);
+  return rows.map((row) => ({
+    channelId: row.channelId,
+    kind: row.kind,
+    name: row.name,
+    unitsSold: Number(row.unitsSold),
+    revenue: Number(row.revenue),
+  }));
+};
+
+/**
+ * Reasons that explain a balance change outside the normal buy/sell loop -
+ * the variance definition of the wave 3 plan (decision D4): every movement
+ * reason that is neither purchase_in nor sale_out.
+ */
+export const VARIANCE_REASONS: readonly MovementReason[] = MOVEMENT_REASONS.filter(
+  (reason) => reason !== 'purchase_in' && reason !== 'sale_out',
+);
+
+export interface VarianceGroupRow {
+  variantId: VariantId;
+  sku: string;
+  productName: string;
+  variantName: string | null;
+  /** Calendar day in Asia/Bangkok, 'YYYY-MM-DD'. */
+  day: string;
+  reason: MovementReason;
+  /** Signed sum of the day's qty_delta for this variant + reason. */
+  qtyDelta: number;
+  movements: number;
+}
+
+/**
+ * Variance groups (variant x day x reason), newest and biggest first.
+ *
+ * The caller merges the reason groups into one row per (variant, day) in
+ * memory. The limit bounds the work for a busy ledger; 500 groups is far past
+ * what a demo tenant produces in a year.
+ */
+export const listVarianceGroups = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId; from: Date; limit?: number },
+): Promise<VarianceGroupRow[]> => {
+  const dayExpr = sql<string>`to_char(${stockMovements.occurredAt} at time zone 'Asia/Bangkok', 'YYYY-MM-DD')`;
+  const day = dayExpr.as('day');
+  const rows = await exec
+    .select({
+      variantId: stockMovements.variantId,
+      sku: variants.sku,
+      productName: products.name,
+      variantName: variants.name,
+      day,
+      reason: stockMovements.reason,
+      qtyDelta: sql<number>`sum(${stockMovements.qtyDelta})::int`.as('qty_delta'),
+      movements: sql<number>`count(*)::int`.as('movements'),
+    })
+    .from(stockMovements)
+    .innerJoin(variants, eq(variants.id, stockMovements.variantId))
+    .innerJoin(products, eq(products.id, variants.productId))
+    .where(
+      and(
+        eq(stockMovements.orgId, params.orgId),
+        inArray(stockMovements.reason, [...VARIANCE_REASONS]),
+        gte(stockMovements.occurredAt, params.from),
+      ),
+    )
+    .groupBy(
+      stockMovements.variantId,
+      variants.sku,
+      products.name,
+      variants.name,
+      dayExpr,
+      stockMovements.reason,
+    )
+    .orderBy(desc(dayExpr), sql`abs(sum(${stockMovements.qtyDelta})) desc`)
+    .limit(params.limit ?? 500);
+  return rows.map((row) => ({
+    ...row,
+    variantId: asVariantId(row.variantId),
+    qtyDelta: Number(row.qtyDelta),
+    movements: Number(row.movements),
+  }));
+};
+
+export interface CogsDayChannelRow {
+  /** Calendar day in Asia/Bangkok, 'YYYY-MM-DD'. */
+  day: string;
+  channelId: string;
+  unitsSold: number;
+  revenue: number;
+  /** Sum of the FIFO lot slices the sales consumed, in satang. */
+  cogs: number;
+}
+
+/**
+ * COGS per day and channel from movement_lot_consumptions.
+ *
+ * The consumption rows are the audit truth for what a sale cost; the movement
+ * total is only their sum. Correlated scalar subqueries (one per movement,
+ * summed per group) keep both the consumption join and the order-line revenue
+ * join from fanning out the units.
+ */
+export const listCogsByDayChannel = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId; from: Date; to: Date },
+): Promise<CogsDayChannelRow[]> => {
+  const dayExpr = sql<string>`to_char(${stockMovements.occurredAt} at time zone 'Asia/Bangkok', 'YYYY-MM-DD')`;
+  const rows = await exec
+    .select({
+      day: dayExpr.as('day'),
+      channelId: sql<string>`${stockMovements.channelId}`.as('channel_id'),
+      unitsSold: sql<number>`sum(-${stockMovements.qtyDelta})::int`.as('units_sold'),
+      // The outer references are written table-qualified on purpose: in a
+      // single-table query drizzle emits bare column names, and inside the
+      // subquery a bare order_id / movement_id would resolve to the INNER
+      // table, silently correlating to nothing.
+      revenue: sql<number>`coalesce(sum((
+          select coalesce(sum(ol.qty * ol.unit_price - ol.discount), 0)
+          from order_lines ol
+          where ol.order_id = stock_movements.order_id
+            and ol.variant_id = stock_movements.variant_id
+        )), 0)::bigint`.as('revenue'),
+      cogs: sql<number>`coalesce(sum((
+          select coalesce(sum(mlc.line_cost), 0)
+          from movement_lot_consumptions mlc
+          where mlc.movement_id = stock_movements.id
+        )), 0)::bigint`.as('cogs'),
+    })
+    .from(stockMovements)
+    .where(
+      and(
+        eq(stockMovements.orgId, params.orgId),
+        eq(stockMovements.reason, 'sale_out'),
+        gte(stockMovements.occurredAt, params.from),
+        lte(stockMovements.occurredAt, params.to),
+        // A sale always carries a channel; guard anyway so the wire type holds.
+        sql`${stockMovements.channelId} is not null`,
+      ),
+    )
+    .groupBy(dayExpr, stockMovements.channelId)
+    .orderBy(desc(dayExpr), stockMovements.channelId);
+  return rows.map((row) => ({
+    day: row.day,
+    channelId: row.channelId,
+    unitsSold: Number(row.unitsSold),
+    revenue: Number(row.revenue),
+    cogs: Number(row.cogs),
+  }));
 };

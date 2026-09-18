@@ -15,7 +15,6 @@
 
 import type {
   Channel,
-  CogsReport,
   DashboardSummary,
   ImportBatch,
   Movement,
@@ -472,29 +471,3 @@ export const MOCK_DASHBOARD: DashboardSummary = {
     },
   ],
 };
-
-export const mockCogsReport = (from: string, to: string): CogsReport => ({
-  from,
-  to,
-  rows: [
-    {
-      date: '2025-01-14',
-      channelId: 'ch_lazada_main',
-      channelName: 'Lazada - ร้านหลัก',
-      unitsSold: 18,
-      revenue: 214300,
-      cogs: 129800,
-      margin: 84500,
-    },
-    {
-      date: '2025-01-15',
-      channelId: 'ch_shopee_main',
-      channelName: 'Shopee - ร้านหลัก',
-      unitsSold: 24,
-      revenue: 338900,
-      cogs: 201450,
-      margin: 137450,
-    },
-  ],
-  totals: { unitsSold: 42, revenue: 553200, cogs: 331250, margin: 221950 },
-});

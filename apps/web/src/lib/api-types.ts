@@ -107,15 +107,16 @@ export interface Channel {
 // GET /api/v1/dashboard/summary
 // ---------------------------------------------------------------------------
 
+/**
+ * Today's sales of one channel, straight from the movement ledger. Revenue is
+ * selling money, not cost, so it is never stripped.
+ */
 export interface DashboardChannelStat {
   channelId: string;
-  channelName: string;
   kind: ChannelKind;
-  /** Units currently attributable to this channel's listings. */
-  onHand: number;
-  todaySold: number;
-  /** cost-gated */
-  stockValue?: MoneyAmount;
+  name: string;
+  unitsSoldToday: number;
+  revenueToday: MoneyAmount;
 }
 
 export interface DashboardSummary {
@@ -441,32 +442,106 @@ export interface ReturnOrderLineInput {
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/v1/reports/cogs - requires the `cost:read` permission
+// GET /api/v1/reports/channel-sales - net sales per channel from orders
 // ---------------------------------------------------------------------------
 
-export interface CogsReportRow {
+/** One row of GET /reports/channel-sales. Revenue is selling money, never cost. */
+export interface ChannelSalesRow {
+  channelId: string;
+  channelName: string;
+  kind: ChannelKind;
+  orders: number;
+  unitsSold: number;
+  revenue: MoneyAmount;
+}
+
+export interface ChannelSalesReport {
+  days: number;
+  /** Start of the window: Bangkok midnight, (days - 1) days before today. */
+  from: IsoDateTime;
+  to: IsoDateTime;
+  rows: ChannelSalesRow[];
+  totals: { orders: number; unitsSold: number; revenue: MoneyAmount };
+}
+
+export interface ChannelSalesQuery {
+  /** Window in days, today included. */
+  days?: number;
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/reports/variance - non-trade balance changes per variant and day
+// ---------------------------------------------------------------------------
+
+/** One reason's share of a variant's variance on one day. */
+export interface VarianceReasonTotal {
+  reason: MovementReason;
+  /** Signed: positive restored, negative lost. */
+  qtyDelta: number;
+  movements: number;
+}
+
+export interface VarianceRow {
   variantId: string;
   sku: string;
   name: string;
-  qtySold: number;
+  /** Calendar day in Asia/Bangkok, 'YYYY-MM-DD'. */
+  day: string;
+  qtyDelta: number;
+  movements: number;
+  byReason: VarianceReasonTotal[];
+}
+
+export interface VarianceReport {
+  days: number;
+  from: IsoDateTime;
+  to: IsoDateTime;
+  rows: VarianceRow[];
+}
+
+export interface VarianceQuery {
+  /** Window in days, today included. */
+  days?: number;
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/reports/cogs - requires the `cost:read` permission
+// ---------------------------------------------------------------------------
+
+/** One row of GET /reports/cogs: sales, FIFO cost and margin of one channel
+ *  on one Bangkok day. The whole endpoint answers 403 without cost:read, so
+ *  the optional cost fields here only document the wire shape. */
+export interface CogsReportRow {
+  /** Bangkok calendar day, 'YYYY-MM-DD'. */
+  date: string;
+  channelId: string;
+  channelName: string;
+  kind: ChannelKind;
+  unitsSold: number;
   revenue: MoneyAmount;
-  cogs: MoneyAmount;
-  grossProfit: MoneyAmount;
-  /** 0-100, one decimal. */
-  marginPct: number;
+  /** cost-gated */
+  cogs?: MoneyAmount;
+  /** cost-gated - revenue minus cogs, computed by the API. */
+  margin?: MoneyAmount;
 }
 
 export interface CogsReportResponse {
   from: string;
   to: string;
-  totalRevenue: MoneyAmount;
-  totalCogs: MoneyAmount;
-  grossProfit: MoneyAmount;
-  marginPct: number;
   rows: CogsReportRow[];
+  totals: {
+    unitsSold: number;
+    revenue: MoneyAmount;
+    /** cost-gated */
+    cogs?: MoneyAmount;
+    /** cost-gated */
+    margin?: MoneyAmount;
+  };
 }
 
 export interface CogsQuery {
+  /** Bangkok calendar date, 'YYYY-MM-DD'. Inclusive. */
   from?: string;
+  /** Bangkok calendar date, 'YYYY-MM-DD'. Inclusive. */
   to?: string;
 }
