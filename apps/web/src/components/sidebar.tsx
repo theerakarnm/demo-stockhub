@@ -76,7 +76,7 @@ export function Sidebar() {
   const { hasPermission } = useRole();
 
   return (
-    <aside className="hidden w-60 shrink-0 border-r border-slate-200 bg-white lg:flex lg:flex-col">
+    <aside className="hidden w-60 shrink-0 border-r border-slate-200 bg-white print:hidden lg:flex lg:flex-col">
       <div className="flex h-14 items-center gap-2 border-b border-slate-200 px-4">
         <span className="flex size-8 items-center justify-center rounded-lg bg-emerald-600 text-sm font-bold text-white">
           SH

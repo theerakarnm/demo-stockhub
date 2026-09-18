@@ -10,7 +10,7 @@ export function Topbar() {
   const { orgName } = useRole();
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4">
+    <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 print:hidden">
       <div className="flex min-w-0 items-center gap-2">
         <Building2 className="size-4 shrink-0 text-slate-400" aria-hidden />
         <span className="truncate text-sm font-medium text-slate-800">{orgName}</span>

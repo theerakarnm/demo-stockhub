@@ -31,11 +31,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* RoleProvider must wrap everything: the sidebar, the top bar and every
             page read the current job position from it. */}
         <RoleProvider>
-          <div className="flex h-screen overflow-hidden">
+          {/* app-shell / app-main are un-clipped by the @media print block in
+              globals.css so the printable bill can flow across A4 pages. */}
+          <div className="app-shell flex h-screen overflow-hidden">
             <Sidebar />
             <div className="flex min-w-0 flex-1 flex-col">
               <Topbar />
-              <main className="flex-1 overflow-y-auto px-4 py-5 lg:px-6">
+              <main className="app-main flex-1 overflow-y-auto px-4 py-5 lg:px-6">
                 <div className="mx-auto w-full max-w-7xl">{children}</div>
               </main>
             </div>

@@ -35,6 +35,7 @@ import {
   Th,
   Thead,
   Tr,
+  buttonClass,
 } from '@/components/ui';
 import { api } from '@/lib/api-client';
 import { customersApi } from '@/lib/api-pricing';
@@ -42,7 +43,7 @@ import type { Movement, Order, ReturnOrderLineInput } from '@/lib/api-types';
 import { baht, formatDateTime, qty } from '@/lib/format';
 import { useApi, useMutation } from '@/lib/use-api';
 import type { OrderStatus } from '@stockhub/core';
-import { Ban, ReceiptText, RotateCcw } from 'lucide-react';
+import { Ban, Printer, ReceiptText, RotateCcw } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
@@ -302,20 +303,32 @@ export default function OrderDetailPage() {
           )
         }
         actions={
-          <PermissionGate permission="order:create">
-            {canCancel ? (
-              <Button variant="outline" loading={busy} onClick={() => setCancelOpen(true)}>
-                <Ban className="size-4" aria-hidden />
-                ยกเลิกบิล
-              </Button>
+          <>
+            {data ? (
+              <Link
+                href={`/orders/${data.id}/print`}
+                className={buttonClass('outline', 'md')}
+                title="เปิดหน้าพิมพ์บิล (บันทึกเป็น PDF ได้จากเบราว์เซอร์)"
+              >
+                <Printer className="size-4" aria-hidden />
+                พิมพ์บิล
+              </Link>
             ) : null}
-            {canReturn ? (
-              <Button variant="outline" loading={busy} onClick={() => setReturnOpen(true)}>
-                <RotateCcw className="size-4" aria-hidden />
-                รับคืนสินค้า
-              </Button>
-            ) : null}
-          </PermissionGate>
+            <PermissionGate permission="order:create">
+              {canCancel ? (
+                <Button variant="outline" loading={busy} onClick={() => setCancelOpen(true)}>
+                  <Ban className="size-4" aria-hidden />
+                  ยกเลิกบิล
+                </Button>
+              ) : null}
+              {canReturn ? (
+                <Button variant="outline" loading={busy} onClick={() => setReturnOpen(true)}>
+                  <RotateCcw className="size-4" aria-hidden />
+                  รับคืนสินค้า
+                </Button>
+              ) : null}
+            </PermissionGate>
+          </>
         }
       />
 

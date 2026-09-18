@@ -32,3 +32,31 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+/* Printable bill (/orders/[id]/print). The browser makes the PDF via
+   window.print(), so printing must turn the app back into a plain document:
+   white A4, no clipping scroll containers, no screen-only shadows. App chrome
+   elements themselves opt out with print:hidden. */
+@media print {
+  /* Chromium lays print out at the full page width and paints inside the
+     @page margins, so margin + w-full content clips at the right edge. The
+     bill sheet therefore carries its own padding instead. */
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  html,
+  body {
+    background: #fff;
+  }
+
+  .app-shell,
+  .app-main,
+  .app-main > div {
+    height: auto !important;
+    max-width: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+}
