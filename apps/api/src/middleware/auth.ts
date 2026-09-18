@@ -19,6 +19,7 @@
  */
 
 import { ROLES, type Role, StockHubError, asOrgId, asUserId, permissionsOf } from '@stockhub/core';
+import { SEED_IDS } from '@stockhub/db';
 import { createMiddleware } from 'hono/factory';
 import { DEFAULT_DEMO_ORG, DEFAULT_DEMO_ROLE, appConfig } from '../env';
 import type { AppEnv, AuthContext } from '../types/app';
@@ -38,6 +39,20 @@ const DEMO_USER_NAMES: Record<Role, string> = {
   sales: 'พนักงานขาย (demo)',
 };
 
+/**
+ * Old callers still send placeholder ids (`org_demo`, `user_demo_owner`), so a
+ * header value that is not a uuid falls back to the seeded org and the seeded
+ * user of the role. Every DB write then satisfies the foreign keys instead of
+ * failing on a made-up id.
+ */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DEMO_USER_IDS: Record<Role, string> = {
+  owner: SEED_IDS.users.owner,
+  manager: SEED_IDS.users.manager,
+  stock_staff: SEED_IDS.users.stock,
+  sales: SEED_IDS.users.sales,
+};
+
 export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
   const config = appConfig(c.env);
 
@@ -54,8 +69,10 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
   }
 
   const role: Role = isRole(rawRole) ? rawRole : DEFAULT_DEMO_ROLE;
-  const orgId = c.req.header(DEMO_ORG_HEADER)?.trim() || DEFAULT_DEMO_ORG;
-  const userId = c.req.header(DEMO_USER_HEADER)?.trim() || `user_demo_${role}`;
+  const rawOrg = c.req.header(DEMO_ORG_HEADER)?.trim();
+  const orgId = rawOrg && UUID_RE.test(rawOrg) ? rawOrg : DEFAULT_DEMO_ORG;
+  const rawUser = c.req.header(DEMO_USER_HEADER)?.trim();
+  const userId = rawUser && UUID_RE.test(rawUser) ? rawUser : DEMO_USER_IDS[role];
 
   const auth: AuthContext = {
     orgId: asOrgId(orgId),

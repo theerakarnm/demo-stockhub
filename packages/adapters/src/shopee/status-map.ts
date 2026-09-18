@@ -31,6 +31,11 @@ export const SHOPEE_STATUS_MAP: Readonly<Record<string, OrderStatus>> = {
   ยกเลิกแล้ว: 'cancelled',
   cancelled: 'cancelled',
   canceled: 'cancelled',
+  // Values of the cancellation/return substatus column ("สถานะการยกเลิก/คืนเงิน"),
+  // not the main status column: the adapter reads this column to override a
+  // "completed" status when the goods actually came back.
+  ยกเลิกโดยผู้ซื้อ: 'cancelled',
+  'cancelled by buyer': 'cancelled',
   // --- return/refund: triggers return_in ---
   'คืนสินค้า/คืนเงิน': 'returned',
   'return/refund': 'returned',

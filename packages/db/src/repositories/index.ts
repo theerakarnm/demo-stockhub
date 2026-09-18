@@ -8,7 +8,11 @@
  */
 
 export * as catalogRepo from './catalog-repo';
+export * as channelRepo from './channel-repo';
+export * as customerRepo from './customer-repo';
 export * as importRepo from './import-repo';
 export * as inventoryRepo from './inventory-repo';
+export * as listingRepo from './listing-repo';
 export * as movementRepo from './movement-repo';
 export * as orderRepo from './order-repo';
+export * as pricingRepo from './pricing-repo';

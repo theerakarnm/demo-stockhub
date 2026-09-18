@@ -13,6 +13,7 @@
  */
 
 import type { Role } from '@stockhub/core';
+import { SEED_IDS } from '@stockhub/db';
 import { z } from 'zod';
 
 /** Shape of `c.env` inside every Hono handler. Mirrors wrangler.toml exactly. */
@@ -84,5 +85,8 @@ export const appConfig = (env: Env): AppConfig =>
 /** Default acting role when the demo header is absent. Read-only, no cost access. */
 export const DEFAULT_DEMO_ROLE: Role = 'sales';
 
-/** Default org for the demo, so a bare curl still returns data. */
-export const DEFAULT_DEMO_ORG = 'org_demo';
+/**
+ * Default org for the demo, so a bare curl still returns data. Points at the
+ * seeded organization so demo writes satisfy the `org_id` foreign keys.
+ */
+export const DEFAULT_DEMO_ORG = SEED_IDS.org;

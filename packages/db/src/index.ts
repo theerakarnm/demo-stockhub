@@ -10,6 +10,9 @@
 export * from './client';
 export * from './repositories';
 
+/** Seeded demo identity. Data only, no side effects, safe to import from apps. */
+export { SEED_IDS } from './seed/data';
+
 /** Tables, enums and relations, namespaced to keep the top level readable. */
 export * as schema from './schema';
 
@@ -18,16 +21,20 @@ export type {
   BundleComponent,
   Channel,
   ChannelListing,
+  Customer,
   ImportBatch,
   MovementLotConsumption,
   NewBundleComponent,
   NewChannel,
   NewChannelListing,
+  NewCustomer,
   NewImportBatch,
   NewMovementLotConsumption,
   NewOrder,
   NewOrderLine,
   NewOrganization,
+  NewPriceTier,
+  NewPriceTierPrice,
   NewProduct,
   NewStockLot,
   NewStockMovement,
@@ -37,6 +44,8 @@ export type {
   Order,
   OrderLine,
   Organization,
+  PriceTier,
+  PriceTierPrice,
   Product,
   StockLot,
   StockMovement,

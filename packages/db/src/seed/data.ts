@@ -23,10 +23,13 @@ import type {
   NewBundleComponent,
   NewChannel,
   NewChannelListing,
+  NewCustomer,
   NewImportBatch,
   NewOrder,
   NewOrderLine,
   NewOrganization,
+  NewPriceTier,
+  NewPriceTierPrice,
   NewProduct,
   NewUser,
   NewVariant,
@@ -93,6 +96,18 @@ export const SEED_IDS = {
     bundleMow: '0f000000-0000-4000-8000-000000000018',
   },
   importBatch: '16000000-0000-4000-8000-000000000001',
+  priceTiers: {
+    retail: '17000000-0000-4000-8000-000000000001',
+    wholesale: '17000000-0000-4000-8000-000000000002',
+    dealer: '17000000-0000-4000-8000-000000000003',
+  },
+  customers: {
+    walkIn: '18000000-0000-4000-8000-000000000001',
+    farmShopA: '18000000-0000-4000-8000-000000000002',
+    farmShopB: '18000000-0000-4000-8000-000000000003',
+    coop: '18000000-0000-4000-8000-000000000004',
+    dealerNorth: '18000000-0000-4000-8000-000000000005',
+  },
   orders: {
     shopeeA: '13000000-0000-4000-8000-000000000001',
     lazadaB: '13000000-0000-4000-8000-000000000002',
@@ -1119,5 +1134,144 @@ export const SEED_ORDER_LINES: NewOrderLine[] = [
     unitPrice: fromBaht(95),
     discount: fromBaht(0),
     matchSource: 'sku_exact',
+  },
+];
+
+/**
+ * Wholesale price tiers.
+ *
+ * `retail` is the default tier with no price rows on purpose: it falls back to
+ * the variant selling price, which is exactly what retail means. The water
+ * can, gloves and hat deliberately have no tier price either, so the fallback
+ * path stays visible in the demo.
+ */
+export const SEED_PRICE_TIERS: NewPriceTier[] = [
+  {
+    id: SEED_IDS.priceTiers.retail,
+    orgId: SEED_IDS.org,
+    code: 'retail',
+    name: 'ราคาปลีก',
+    sortOrder: 1,
+    isDefault: true,
+  },
+  {
+    id: SEED_IDS.priceTiers.wholesale,
+    orgId: SEED_IDS.org,
+    code: 'wholesale',
+    name: 'ราคาส่ง',
+    sortOrder: 2,
+    isDefault: false,
+  },
+  {
+    id: SEED_IDS.priceTiers.dealer,
+    orgId: SEED_IDS.org,
+    code: 'dealer',
+    name: 'ราคาตัวแทน',
+    sortOrder: 3,
+    isDefault: false,
+  },
+];
+
+/** Selling prices in whole baht, mirrored from SEED_VARIANTS above. */
+const SEED_SELLING_BAHT: Record<string, number> = {
+  [SEED_IDS.variants.hoe]: 185,
+  [SEED_IDS.variants.spade]: 165,
+  [SEED_IDS.variants.machete]: 240,
+  [SEED_IDS.variants.pruner]: 320,
+  [SEED_IDS.variants.mower]: 4390,
+  [SEED_IDS.variants.blade]: 95,
+  [SEED_IDS.variants.hose]: 450,
+  [SEED_IDS.variants.nozzle]: 135,
+  [SEED_IDS.variants.conn]: 45,
+  [SEED_IDS.variants.fert50]: 980,
+  [SEED_IDS.variants.fert25]: 520,
+  [SEED_IDS.variants.sprayer]: 890,
+};
+
+/** Tier price for one variant: the discounted baht figure, in satang. */
+const tierBaht = (variantId: string, factor: number): number => {
+  const baht = SEED_SELLING_BAHT[variantId];
+  if (baht === undefined) throw new Error(`No seed selling price for variant ${variantId}`);
+  return fromBaht(Math.round(baht * factor));
+};
+
+const WHOLESALE_VARIANTS = [
+  SEED_IDS.variants.hoe,
+  SEED_IDS.variants.spade,
+  SEED_IDS.variants.machete,
+  SEED_IDS.variants.pruner,
+  SEED_IDS.variants.mower,
+  SEED_IDS.variants.blade,
+  SEED_IDS.variants.hose,
+  SEED_IDS.variants.nozzle,
+  SEED_IDS.variants.conn,
+  SEED_IDS.variants.fert50,
+  SEED_IDS.variants.fert25,
+  SEED_IDS.variants.sprayer,
+] as const;
+
+const DEALER_VARIANTS = [
+  SEED_IDS.variants.hoe,
+  SEED_IDS.variants.spade,
+  SEED_IDS.variants.machete,
+  SEED_IDS.variants.mower,
+  SEED_IDS.variants.fert50,
+  SEED_IDS.variants.sprayer,
+] as const;
+
+const seedTierPriceId = (base: string, index: number): string =>
+  `${base}-0000-4000-8000-${String(index + 1).padStart(12, '0')}`;
+
+export const SEED_PRICE_TIER_PRICES: NewPriceTierPrice[] = [
+  ...WHOLESALE_VARIANTS.map((variantId, index) => ({
+    id: seedTierPriceId('11000000', index),
+    orgId: SEED_IDS.org,
+    priceTierId: SEED_IDS.priceTiers.wholesale,
+    variantId,
+    price: tierBaht(variantId, 0.9),
+  })),
+  ...DEALER_VARIANTS.map((variantId, index) => ({
+    id: seedTierPriceId('12000000', index),
+    orgId: SEED_IDS.org,
+    priceTierId: SEED_IDS.priceTiers.dealer,
+    variantId,
+    price: tierBaht(variantId, 0.82),
+  })),
+];
+
+/** Wholesale counter customers. Walk-in has no tier and no phone on purpose. */
+export const SEED_CUSTOMERS: NewCustomer[] = [
+  {
+    id: SEED_IDS.customers.walkIn,
+    orgId: SEED_IDS.org,
+    name: 'ลูกค้าหน้าร้าน',
+  },
+  {
+    id: SEED_IDS.customers.farmShopA,
+    orgId: SEED_IDS.org,
+    name: 'ร้านสวนเกษตรดี',
+    phone: '053111001',
+    priceTierId: SEED_IDS.priceTiers.wholesale,
+  },
+  {
+    id: SEED_IDS.customers.farmShopB,
+    orgId: SEED_IDS.org,
+    name: 'ร้านเกษตรภัณฑ์บ้านนา',
+    phone: '053111002',
+    priceTierId: SEED_IDS.priceTiers.wholesale,
+  },
+  {
+    id: SEED_IDS.customers.coop,
+    orgId: SEED_IDS.org,
+    name: 'สหกรณ์การเกษตรหนองบัว',
+    phone: '053111003',
+    priceTierId: SEED_IDS.priceTiers.wholesale,
+  },
+  {
+    id: SEED_IDS.customers.dealerNorth,
+    orgId: SEED_IDS.org,
+    name: 'ตัวแทนภาคเหนือ',
+    phone: '053111004',
+    priceTierId: SEED_IDS.priceTiers.dealer,
   },
 ];

@@ -1,10 +1,8 @@
 /**
  * TikTok Shop adapter tests.
  *
- * detect() is implemented, so the detect block MUST PASS.
- * parse() still has its TODO block, so the parse block is `test.skip` with the
- * assertions already written - delete `.skip` one test at a time as you fill in
- * TODO BLOCK 1 and TODO BLOCK 2 in adapter.ts. That is your TDD loop.
+ * detect() and parse() are both fully implemented, so nothing here is skipped:
+ * these assertions are the executable spec of the TikTok parse.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -43,7 +41,7 @@ describe('tiktokAdapter.detect', () => {
 });
 
 describe('tiktokAdapter.parse', () => {
-  test.skip('skips the description row and parses every order', async () => {
+  test('skips the description row and parses every order', async () => {
     const result = await tiktokAdapter.parse(loadFixture(TIKTOK_FIXTURE), ctx);
 
     // 4 data rows, because the description row under the header is not data.
@@ -52,7 +50,7 @@ describe('tiktokAdapter.parse', () => {
     expect(result.issues.filter((issue) => issue.severity === 'error')).toHaveLength(0);
   });
 
-  test.skip('groups the two rows of order ...002 into one order', async () => {
+  test('groups the two rows of order ...002 into one order', async () => {
     const result = await tiktokAdapter.parse(loadFixture(TIKTOK_FIXTURE), ctx);
     const order = result.orders.find((o) => o.externalOrderId === '577000000000000002');
 
@@ -61,12 +59,12 @@ describe('tiktokAdapter.parse', () => {
     expect(order?.lines[0]?.quantity).toBe(2);
   });
 
-  test.skip('keeps the 19 digit order id as text', async () => {
+  test('keeps the 19 digit order id as text', async () => {
     const result = await tiktokAdapter.parse(loadFixture(TIKTOK_FIXTURE), ctx);
     expect(result.orders.map((order) => order.externalOrderId)).toContain('577000000000000001');
   });
 
-  test.skip('parses day-first dates as Bangkok wall clock', async () => {
+  test('parses day-first dates as Bangkok wall clock', async () => {
     const result = await tiktokAdapter.parse(loadFixture(TIKTOK_FIXTURE), ctx);
     const order = result.orders.find((o) => o.externalOrderId === '577000000000000001');
 
@@ -75,7 +73,7 @@ describe('tiktokAdapter.parse', () => {
     expect(order?.status).toBe('delivered');
   });
 
-  test.skip('reads the seller discount, not the platform discount', async () => {
+  test('reads the seller discount, not the platform discount', async () => {
     const result = await tiktokAdapter.parse(loadFixture(TIKTOK_FIXTURE), ctx);
     const order = result.orders.find((o) => o.externalOrderId === '577000000000000002');
 

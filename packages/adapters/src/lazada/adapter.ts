@@ -27,26 +27,28 @@
  *     stock by a factor of the quantity, so it is the single most important
  *     thing to verify against a real Lazada export.
  *   - `unitPrice` is the list price and `paidPrice` is what the buyer actually
- *     paid. Use paidPrice for revenue and derive the seller discount from the
- *     difference only if `sellerDiscountTotal` is absent.
+ *     paid. The recorded line price is the `unitPrice` column and the discount
+ *     is `sellerDiscountTotal` - adapter.test.ts pins both, so paidPrice stays
+ *     informational only.
  *   - Headers are camelCase; header-match.ts already lowercases them.
  */
 
-import {
-  type DetectionResult,
-  type NormalizedOrder,
-  NotImplementedError,
-  type OrderSourceAdapter,
-  type OrderStatus,
-  type ParseContext,
-  type ParseIssue,
-  type ParseResult,
-  type RawImportFile,
-  type Satang,
+import type {
+  DetectionResult,
+  NormalizedOrder,
+  NormalizedOrderLine,
+  OrderSourceAdapter,
+  OrderStatus,
+  ParseContext,
+  ParseIssue,
+  ParseResult,
+  RawImportFile,
+  Satang,
 } from '@stockhub/core';
 import { groupRowsByOrder } from '../shared/group-rows';
 import { buildHeaderIndex, cell, resolveColumns, scoreSignature } from '../shared/header-match';
-import { parseDate, parseMoney } from '../shared/parse-values';
+import { assembleOrder, mapLine } from '../shared/map-lines';
+import { parseDate, parseMoney, parseQty } from '../shared/parse-values';
 import { looksLikeMojibake, readHeaders, readTabular } from '../shared/read-tabular';
 import { LAZADA_COLUMNS, LAZADA_SIGNATURE, type LazadaColumn } from './columns';
 import { mapLazadaStatus } from './status-map';
@@ -65,8 +67,15 @@ const READ_OPTIONS = { headerRow: 0, skipRowsAfterHeader: 0 } as const;
 const FIRST_DATA_ROW = 2;
 
 /**
+ * Synthetic quantity header. Collapsed per-unit totals are written to the row
+ * copy under this key and handed to mapLine as `columns.quantity`, so the
+ * shared mapper never learns about Lazada's one-row-per-unit layout.
+ */
+const QTY_KEY = '__qty';
+
+/**
  * Order-level fields, parsed for real from the first row of each order group.
- * The remaining work (mapping the lines) is the TODO block in `parse()`.
+ * Line mapping happens in the parse loop via shared/map-lines.ts.
  */
 interface OrderHeaderDraft {
   externalOrderId: string;
@@ -112,15 +121,16 @@ export class LazadaOrderAdapter implements OrderSourceAdapter {
   }
 
   /**
-   * SKELETON. The plumbing below is real; the line mapping is the TODO block.
+   * Fully implemented: every stage of the pipeline below runs for real.
    *
    * Pipeline:
-   *   1. read the sheet            -> shared/read-tabular.ts   (done)
-   *   2. resolve columns           -> shared/header-match.ts   (done)
-   *   3. group rows into orders    -> shared/group-rows.ts     (done)
-   *   4. parse order-level fields  -> below                    (done)
-   *   5. map each row to a line    -> TODO BLOCK 1
-   *   6. assemble NormalizedOrder  -> TODO BLOCK 2
+   *   1. read the sheet            -> shared/read-tabular.ts
+   *   2. resolve columns           -> shared/header-match.ts
+   *   3. group rows into orders    -> shared/group-rows.ts
+   *   4. parse order-level fields  -> below
+   *   5. collapse per-unit rows    -> below (Lazada only)
+   *   6. map each row to a line    -> shared/map-lines.ts (mapLine)
+   *   7. assemble NormalizedOrder  -> shared/map-lines.ts (assembleOrder)
    */
   async parse(file: RawImportFile, ctx: ParseContext): Promise<ParseResult> {
     const issues: ParseIssue[] = [];
@@ -223,55 +233,45 @@ export class LazadaOrderAdapter implements OrderSourceAdapter {
 
     const orders: NormalizedOrder[] = [];
 
-    /* =====================================================================
-     * TODO BLOCK 1 - map each row of a draft to a NormalizedOrderLine.
-     * For every draft, for every `draft.rows[i]` (row number
-     * `draft.rowNumbers[i]`):
-     *   1. platformSku = cell(row, columns.platformSku)
-     *      -> if undefined: push { severity:'error', code:'missing_sku' } and
-     *         skip the LINE, not the whole order.
-     *   2. quantity = parseQty(cell(row, columns.quantity))
-     *      -> if undefined or 0: push 'bad_quantity' and skip the line.
-     *   3. unitPrice = parseMoney(cell(row, columns.unitPrice)) ?? ZERO
-     *      -> ZERO is legitimate for a free gift line; warn, do not fail.
-     *   4. discount = parseMoney(cell(row, columns.sellerDiscount)) ?? ZERO
-     *      -> SELLER-FUNDED ONLY. Platform subsidy is revenue, not a discount,
-     *         and must not reduce the recorded sale value.
-     *   5. platformProductName = cell(row, columns.productName) ?? platformSku
-     *   6. variationName = cell(row, columns.variationName)
-     *   7. push { platformSku, platformProductName, variationName, quantity,
-     *              unitPrice, discount }
-     *   7b. LAZADA ONLY: collapse rows first. Group `draft.rows` by
-     *       cell(row, columns.platformSku); quantity = group length when
-     *       `columns.quantity` is undefined, otherwise the parsed cell.
-     *       Keep the first `orderItemId` as externalLineId.
-     * =====================================================================
-     *
-     * TODO BLOCK 2 - assemble the order.
-     *   8.  if lines.length === 0: push 'empty_order' and skip the order.
-     *   9.  computed = sum(unitPrice * quantity - discount) over lines.
-     *   10. if draft.grandTotal is present and differs from `computed` by more
-     *       than 1 satang, push a 'total_mismatch' WARNING carrying both
-     *       numbers. Do not reject - shipping fees and platform vouchers make
-     *       small differences normal, but a large one means the column map is
-     *       wrong and support needs to see it.
-     *   11. orders.push({
-     *         externalOrderId: draft.externalOrderId,
-     *         channelKind: 'lazada',
-     *         status: draft.status,
-     *         orderedAt: draft.orderedAt,
-     *         shippedAt: draft.shippedAt,
-     *         buyerName: draft.buyerName,
-     *         grandTotal: draft.grandTotal ?? computed,
-     *         lines,
-     *         raw: { rows: draft.rows },   // verbatim, for support
-     *       });
-     *   12. Delete the `throw` below.
-     * ===================================================================== */
-    if (drafts.length > 0) {
-      throw new NotImplementedError(
-        `LazadaOrderAdapter.parse line mapping (${drafts.length} orders / ${table.rows.length} rows were recognised)`,
-      );
+    // --- 5. collapse per-unit rows (LAZADA ONLY) ---------------------------
+    // One row is one unit, so rows sharing a seller SKU fold into ONE line:
+    // keep the first row's cells (its orderItemId becomes the externalLineId)
+    // and sum the units - a parsed quantity cell wins, any other row counts 1.
+    // A missing SKU forms its own group, so mapLine still reports it per line.
+    for (const draft of drafts) {
+      const collapsed = new Map<
+        string,
+        { row: Record<string, string>; rowNumber: number; units: number }
+      >();
+      draft.rows.forEach((row, i) => {
+        const key = cell(row, columns.platformSku) ?? '';
+        const units = parseQty(cell(row, columns.quantity)) ?? 1;
+        const existing = collapsed.get(key);
+        if (existing) {
+          existing.units += units;
+          return;
+        }
+        collapsed.set(key, { row, rowNumber: draft.rowNumbers[i] ?? FIRST_DATA_ROW, units });
+      });
+
+      // --- 6/7. map the collapsed rows to lines, then assemble the order ---
+      // Line mapping and assembly are shared with Shopee and TikTok
+      // (shared/map-lines.ts). The collapsed total reaches the mapper through
+      // a synthetic quantity cell on a row copy, so the mapper never learns
+      // about per-unit rows.
+      const lines: NormalizedOrderLine[] = [];
+      for (const { row, rowNumber, units } of collapsed.values()) {
+        const line = mapLine(
+          { ...row, [QTY_KEY]: String(units) },
+          rowNumber,
+          { ...columns, quantity: QTY_KEY },
+          issues,
+        );
+        if (line) lines.push(line);
+      }
+
+      const order = assembleOrder(draft, lines, 'lazada', issues);
+      if (order) orders.push(order);
     }
 
     const linesParsed = orders.reduce((sum, order) => sum + order.lines.length, 0);

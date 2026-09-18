@@ -8,17 +8,18 @@
 
 import {
   type StockLot as DomainStockLot,
-  NotImplementedError,
   type OrgId,
+  StockHubError,
   type VariantId,
   type WarehouseId,
   asStockLotId,
   asVariantId,
   satang,
 } from '@stockhub/core';
-import { and, asc, eq, gt, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, gte, ilike, or, sql } from 'drizzle-orm';
 import type { DbExecutor } from '../client';
-import { stockLots } from '../schema';
+import { orderLines, orders, products, stockLots, variants, warehouses } from '../schema';
+import type { Warehouse } from '../schema';
 
 export interface LotQuery {
   orgId: OrgId;
@@ -73,6 +74,49 @@ export const getOpenLotsForUpdate = async (
   }));
 };
 
+/** Read-only lot view for the variant detail screen. */
+export interface OpenLotRow {
+  id: string;
+  variantId: VariantId;
+  remainingQty: number;
+  receivedQty: number;
+  unitCost: number;
+  receivedAt: Date;
+  reference: string | null;
+}
+
+/**
+ * The `getOpenLotsForUpdate` query without `.for('update')`: a read path must
+ * never take row locks. It spans every warehouse because the detail screen
+ * shows the variant's whole position, and it keeps `receivedQty` / `reference`,
+ * which the locked FIFO query does not need but the UI renders next to the cost.
+ */
+export const listOpenLots = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId; variantId: VariantId },
+): Promise<OpenLotRow[]> => {
+  const rows = await exec
+    .select({
+      id: stockLots.id,
+      variantId: stockLots.variantId,
+      remainingQty: stockLots.remainingQty,
+      receivedQty: stockLots.qty,
+      unitCost: stockLots.unitCost,
+      receivedAt: stockLots.receivedAt,
+      reference: stockLots.reference,
+    })
+    .from(stockLots)
+    .where(
+      and(
+        eq(stockLots.orgId, params.orgId),
+        eq(stockLots.variantId, params.variantId),
+        gt(stockLots.remainingQty, 0),
+      ),
+    )
+    .orderBy(asc(stockLots.receivedAt), asc(stockLots.id));
+  return rows.map((row) => ({ ...row, variantId: asVariantId(row.variantId) }));
+};
+
 /** On-hand quantity per variant, derived from the open lots. */
 export const getOnHandByVariant = async (
   exec: DbExecutor,
@@ -99,8 +143,11 @@ export interface StockOverviewRow {
   sku: string;
   productName: string;
   variantName: string | null;
+  kind: 'simple' | 'bundle';
   unit: string;
+  sellingPrice: number;
   onHand: number;
+  reserved: number;
   reorderPoint: number;
   /** Cost fields. The API must call stripCost() before sending these to a
    *  role without the 'cost:read' permission. */
@@ -111,48 +158,172 @@ export interface StockOverviewRow {
 /**
  * The main stock screen: one row per variant with quantity and value.
  *
- * TODO(template) implement:
- *   SELECT v.id, v.sku, p.name, v.name, v.unit, v.reorder_point,
- *          coalesce(sum(l.remaining_qty), 0)                   AS on_hand,
- *          coalesce(sum(l.remaining_qty * l.unit_cost), 0)     AS stock_value
- *     FROM variants v
- *     JOIN products p ON p.id = v.product_id
- *     LEFT JOIN stock_lots l
- *       ON l.variant_id = v.id
- *      AND l.remaining_qty > 0
- *      AND (:warehouseId IS NULL OR l.warehouse_id = :warehouseId)
- *    WHERE v.org_id = :orgId AND v.is_active
- *    GROUP BY v.id, p.name
- *    ORDER BY p.name
- *   avg_unit_cost = stock_value / nullif(on_hand, 0)
+ * The page is a keyset page, not an OFFSET page: `after` is the last row the
+ * caller already served, compared as the (product name, variant id) tuple, so
+ * an insert between pages can never shift a row across the page border.
+ * `limit + 1` rows come back so the caller can tell whether a cursor follows.
  *
- * Bundles need a second pass: they own no lots, so their `onHand` is
+ * Bundles own no lots, so their `onHand` is 0 here; the service overlays
  * bundleAvailability(components, onHandByVariant) from @stockhub/core.
  */
 export const getStockOverview = async (
-  _exec: DbExecutor,
-  _params: { orgId: OrgId; warehouseId?: WarehouseId; search?: string },
+  exec: DbExecutor,
+  params: {
+    orgId: OrgId;
+    warehouseId?: WarehouseId;
+    search?: string;
+    after?: { name: string; id: string };
+    limit: number;
+  },
 ): Promise<StockOverviewRow[]> => {
-  throw new NotImplementedError('getStockOverview');
+  // Open FIFO layers only: a fully consumed lot must not feed qty or value.
+  // Both aggregates come out of one pass over the lots.
+  const lotTotals = exec
+    .select({
+      variantId: stockLots.variantId,
+      onHand: sql<number>`sum(${stockLots.remainingQty})::int`.as('on_hand'),
+      // bigint sums can arrive as strings depending on the driver, hence the
+      // Number() mapping below instead of trusting the declared type.
+      stockValue: sql<
+        string | number
+      >`sum(${stockLots.remainingQty} * ${stockLots.unitCost})::bigint`.as('stock_value'),
+    })
+    .from(stockLots)
+    .where(
+      params.warehouseId
+        ? and(
+            eq(stockLots.orgId, params.orgId),
+            eq(stockLots.warehouseId, params.warehouseId),
+            gt(stockLots.remainingQty, 0),
+          )
+        : and(eq(stockLots.orgId, params.orgId), gt(stockLots.remainingQty, 0)),
+    )
+    .groupBy(stockLots.variantId)
+    .as('lot_totals');
+
+  // Confirmed orders hold stock back for a customer even before sale_out runs.
+  const reservedTotals = exec
+    .select({
+      variantId: orderLines.variantId,
+      reserved: sql<number>`sum(${orderLines.qty})::int`.as('reserved'),
+    })
+    .from(orderLines)
+    .innerJoin(orders, eq(orders.id, orderLines.orderId))
+    .where(and(eq(orderLines.orgId, params.orgId), eq(orders.status, 'confirmed')))
+    .groupBy(orderLines.variantId)
+    .as('reserved_totals');
+
+  const rows = await exec
+    .select({
+      variantId: variants.id,
+      sku: variants.sku,
+      productName: products.name,
+      variantName: variants.name,
+      kind: variants.kind,
+      unit: variants.unit,
+      sellingPrice: variants.sellingPrice,
+      onHand: lotTotals.onHand,
+      reserved: reservedTotals.reserved,
+      reorderPoint: variants.reorderPoint,
+      stockValue: lotTotals.stockValue,
+    })
+    .from(variants)
+    .innerJoin(products, eq(products.id, variants.productId))
+    .leftJoin(lotTotals, eq(lotTotals.variantId, variants.id))
+    .leftJoin(reservedTotals, eq(reservedTotals.variantId, variants.id))
+    .where(
+      and(
+        eq(variants.orgId, params.orgId),
+        eq(variants.isActive, true),
+        params.search
+          ? or(
+              ilike(variants.sku, `%${params.search}%`),
+              ilike(products.name, `%${params.search}%`),
+              ilike(variants.name, `%${params.search}%`),
+            )
+          : undefined,
+        params.after
+          ? sql`(${products.name}, ${variants.id}) > (${params.after.name}, ${params.after.id})`
+          : undefined,
+      ),
+    )
+    .orderBy(asc(products.name), asc(variants.id))
+    .limit(params.limit + 1);
+
+  return rows.map((row) => {
+    const onHand = row.onHand ?? 0;
+    const stockValue = Number(row.stockValue ?? 0);
+    return {
+      variantId: asVariantId(row.variantId),
+      sku: row.sku,
+      productName: row.productName,
+      variantName: row.variantName,
+      kind: row.kind,
+      unit: row.unit,
+      sellingPrice: row.sellingPrice,
+      onHand,
+      reserved: row.reserved ?? 0,
+      reorderPoint: row.reorderPoint,
+      stockValue,
+      avgUnitCost: onHand === 0 ? 0 : Math.round(stockValue / onHand),
+    };
+  });
 };
 
 /**
  * Write the lot deltas produced by consumeFifo / restoreFifo.
  *
- * TODO(template) implement as one UPDATE per lot inside the caller's
- * transaction:
- *   UPDATE stock_lots
- *      SET remaining_qty = remaining_qty - :qty, updated_at = now()
- *    WHERE id = :lotId AND remaining_qty >= :qty
- * Check the affected row count. A 0 there means somebody consumed the lot
- * between the SELECT FOR UPDATE and this write, which must abort the
- * transaction instead of producing a negative quantity.
+ * Every delta is one guarded UPDATE: the WHERE clause re-checks the quantity
+ * the caller saw when it locked the lot, so a lost lock can only abort the
+ * transaction, never drive `remaining_qty` below 0 or above the received qty.
+ * A 0-row UPDATE throws `conflict` because somebody consumed the lot between
+ * the SELECT FOR UPDATE and this write.
  *
  * Pass a negative `qty` to restore (return / cancel).
  */
 export const applyLotDeltas = async (
-  _exec: DbExecutor,
-  _deltas: readonly { lotId: string; qty: number }[],
+  exec: DbExecutor,
+  deltas: readonly { lotId: string; qty: number }[],
 ): Promise<void> => {
-  throw new NotImplementedError('applyLotDeltas');
+  for (const delta of deltas) {
+    if (delta.qty === 0) continue;
+    // consuming: enough left; restoring: never above what was received
+    const guard =
+      delta.qty > 0
+        ? gte(stockLots.remainingQty, delta.qty)
+        : sql`${stockLots.remainingQty} - ${delta.qty} <= ${stockLots.qty}`;
+    const updated = await exec
+      .update(stockLots)
+      .set({ remainingQty: sql`${stockLots.remainingQty} - ${delta.qty}` })
+      .where(and(eq(stockLots.id, delta.lotId), guard))
+      .returning({ id: stockLots.id });
+    if (updated.length === 0) {
+      throw new StockHubError('conflict', `Lot ${delta.lotId} changed between lock and write`, {
+        lotId: delta.lotId,
+        qty: delta.qty,
+      });
+    }
+  }
+};
+
+/**
+ * The warehouse marketplace imports feed when the caller did not pick one.
+ * Exactly one warehouse per org carries `is_default`; if the org has none the
+ * caller cannot proceed, so this throws `not_found` instead of returning null.
+ */
+export const getDefaultWarehouse = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId },
+): Promise<Warehouse> => {
+  const [row] = await exec
+    .select()
+    .from(warehouses)
+    .where(and(eq(warehouses.orgId, params.orgId), eq(warehouses.isDefault, true)))
+    .limit(1);
+  if (!row) {
+    throw new StockHubError('not_found', `Org ${params.orgId} has no default warehouse`, {
+      orgId: params.orgId,
+    });
+  }
+  return row;
 };

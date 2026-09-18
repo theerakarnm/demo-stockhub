@@ -32,20 +32,21 @@
  *     already have destroyed the id. Warn about it in the preview screen.
  */
 
-import {
-  type DetectionResult,
-  type NormalizedOrder,
-  NotImplementedError,
-  type OrderSourceAdapter,
-  type OrderStatus,
-  type ParseContext,
-  type ParseIssue,
-  type ParseResult,
-  type RawImportFile,
-  type Satang,
+import type {
+  DetectionResult,
+  NormalizedOrder,
+  NormalizedOrderLine,
+  OrderSourceAdapter,
+  OrderStatus,
+  ParseContext,
+  ParseIssue,
+  ParseResult,
+  RawImportFile,
+  Satang,
 } from '@stockhub/core';
 import { groupRowsByOrder } from '../shared/group-rows';
 import { buildHeaderIndex, cell, resolveColumns, scoreSignature } from '../shared/header-match';
+import { assembleOrder, mapLine } from '../shared/map-lines';
 import { parseDate, parseMoney } from '../shared/parse-values';
 import { looksLikeMojibake, readHeaders, readTabular } from '../shared/read-tabular';
 import { TIKTOK_COLUMNS, TIKTOK_SIGNATURE, type TiktokColumn } from './columns';
@@ -117,15 +118,15 @@ export class TiktokOrderAdapter implements OrderSourceAdapter {
   }
 
   /**
-   * SKELETON. The plumbing below is real; the line mapping is the TODO block.
+   * Fully implemented: every stage of the pipeline below runs for real.
    *
    * Pipeline:
-   *   1. read the sheet            -> shared/read-tabular.ts   (done)
-   *   2. resolve columns           -> shared/header-match.ts   (done)
-   *   3. group rows into orders    -> shared/group-rows.ts     (done)
-   *   4. parse order-level fields  -> below                    (done)
-   *   5. map each row to a line    -> TODO BLOCK 1
-   *   6. assemble NormalizedOrder  -> TODO BLOCK 2
+   *   1. read the sheet            -> shared/read-tabular.ts
+   *   2. resolve columns           -> shared/header-match.ts
+   *   3. group rows into orders    -> shared/group-rows.ts
+   *   4. parse order-level fields  -> below
+   *   5. map each row to a line    -> shared/map-lines.ts (mapLine)
+   *   6. assemble NormalizedOrder  -> shared/map-lines.ts (assembleOrder)
    */
   async parse(file: RawImportFile, ctx: ParseContext): Promise<ParseResult> {
     const issues: ParseIssue[] = [];
@@ -228,54 +229,29 @@ export class TiktokOrderAdapter implements OrderSourceAdapter {
 
     const orders: NormalizedOrder[] = [];
 
-    /* =====================================================================
-     * TODO BLOCK 1 - map each row of a draft to a NormalizedOrderLine.
-     * For every draft, for every `draft.rows[i]` (row number
-     * `draft.rowNumbers[i]`):
-     *   1. platformSku = cell(row, columns.platformSku)
-     *      -> if undefined: push { severity:'error', code:'missing_sku' } and
-     *         skip the LINE, not the whole order.
-     *   2. quantity = parseQty(cell(row, columns.quantity))
-     *      -> if undefined or 0: push 'bad_quantity' and skip the line.
-     *   3. unitPrice = parseMoney(cell(row, columns.unitPrice)) ?? ZERO
-     *      -> ZERO is legitimate for a free gift line; warn, do not fail.
-     *   4. discount = parseMoney(cell(row, columns.sellerDiscount)) ?? ZERO
-     *      -> SELLER-FUNDED ONLY. Platform subsidy is revenue, not a discount,
-     *         and must not reduce the recorded sale value.
-     *   5. platformProductName = cell(row, columns.productName) ?? platformSku
-     *   6. variationName = cell(row, columns.variationName)
-     *   7. push { platformSku, platformProductName, variationName, quantity,
-     *              unitPrice, discount }
-     *   7b. TIKTOK ONLY: read `orderSubStatus` as well. A "Cancelled" order whose
-     *       substatus says it was cancelled before handover never moved stock,
-     *       so it must NOT produce a cancel_restore movement later.
-     * =====================================================================
-     *
-     * TODO BLOCK 2 - assemble the order.
-     *   8.  if lines.length === 0: push 'empty_order' and skip the order.
-     *   9.  computed = sum(unitPrice * quantity - discount) over lines.
-     *   10. if draft.grandTotal is present and differs from `computed` by more
-     *       than 1 satang, push a 'total_mismatch' WARNING carrying both
-     *       numbers. Do not reject - shipping fees and platform vouchers make
-     *       small differences normal, but a large one means the column map is
-     *       wrong and support needs to see it.
-     *   11. orders.push({
-     *         externalOrderId: draft.externalOrderId,
-     *         channelKind: 'tiktok',
-     *         status: draft.status,
-     *         orderedAt: draft.orderedAt,
-     *         shippedAt: draft.shippedAt,
-     *         buyerName: draft.buyerName,
-     *         grandTotal: draft.grandTotal ?? computed,
-     *         lines,
-     *         raw: { rows: draft.rows },   // verbatim, for support
-     *       });
-     *   12. Delete the `throw` below.
-     * ===================================================================== */
-    if (drafts.length > 0) {
-      throw new NotImplementedError(
-        `TiktokOrderAdapter.parse line mapping (${drafts.length} orders / ${table.rows.length} rows were recognised)`,
-      );
+    // --- 5/6. map each row to a line, then assemble the order --------------
+    // Line mapping and assembly are shared with Shopee and Lazada
+    // (shared/map-lines.ts). What stays here is the TikTok substatus override:
+    // a substatus mapping to cancelled or returned wins over the main status,
+    // because a "Cancelled" order whose substatus says it was cancelled before
+    // handover never moved stock, so no cancel_restore movement may be
+    // produced later.
+    for (const draft of drafts) {
+      const lines: NormalizedOrderLine[] = [];
+      draft.rows.forEach((row, i) => {
+        const line = mapLine(row, draft.rowNumbers[i] ?? FIRST_DATA_ROW, columns, issues);
+        if (line) lines.push(line);
+      });
+      const substatus = cell(draft.rows[0] ?? {}, columns.orderSubStatus);
+      const override = mapTiktokStatus(substatus);
+      const status = override === 'cancelled' || override === 'returned' ? override : draft.status;
+      const order = assembleOrder({ ...draft, status }, lines, 'tiktok', issues);
+      if (order) {
+        // raw keeps the substatus next to the verbatim rows so support can see
+        // why an order ended up cancelled or returned.
+        order.raw = { rows: draft.rows, substatus };
+        orders.push(order);
+      }
     }
 
     const linesParsed = orders.reduce((sum, order) => sum + order.lines.length, 0);

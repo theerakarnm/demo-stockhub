@@ -12,8 +12,10 @@
 import { Button, Table, TableWrap, Tbody, Td, Th, Thead, Tr } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import { baht, qty } from '@/lib/format';
+import type { PriceSource } from '@stockhub/core';
 import { fromBaht } from '@stockhub/core';
 import { Trash2 } from 'lucide-react';
+import { priceSourceLabel } from './reprice';
 
 export interface CartLine {
   variantId: string;
@@ -26,10 +28,16 @@ export interface CartLine {
   /** Raw text of the baht input. Empty string while the user clears the field. */
   priceBaht: string;
   discountBaht: string;
+  /** True once the cashier edited the price by hand: repricing must skip it. */
+  priceTouched: boolean;
+  /** Where the current price came from, set by the last reprice. */
+  priceSource?: PriceSource;
 }
 
 /** Editable fields of a cart row. */
-export type CartLinePatch = Partial<Pick<CartLine, 'quantity' | 'priceBaht' | 'discountBaht'>>;
+export type CartLinePatch = Partial<
+  Pick<CartLine, 'quantity' | 'priceBaht' | 'discountBaht' | 'priceTouched' | 'priceSource'>
+>;
 
 const toSatang = (text: string): number => {
   const value = Number(text);
@@ -116,9 +124,19 @@ export function CartTable({ lines, onPatch, onRemove }: CartTableProps) {
                     step="0.01"
                     value={line.priceBaht}
                     aria-label={`ราคาต่อหน่วยของ ${line.sku}`}
-                    onChange={(event) => onPatch(line.variantId, { priceBaht: event.target.value })}
+                    onChange={(event) =>
+                      onPatch(line.variantId, {
+                        priceBaht: event.target.value,
+                        priceTouched: true,
+                      })
+                    }
                     className={cn(NUMBER_INPUT, 'w-24', NEUTRAL_INPUT)}
                   />
+                  {line.priceSource ? (
+                    <p className="mt-1 max-w-32 text-[11px] leading-tight text-slate-400">
+                      {priceSourceLabel(line.priceSource)}
+                    </p>
+                  ) : null}
                 </Td>
                 <Td numeric>
                   <input

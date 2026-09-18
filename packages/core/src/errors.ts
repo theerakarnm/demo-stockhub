@@ -19,11 +19,15 @@ export class NotImplementedError extends StockHubError {
 
 export class InsufficientStockError extends StockHubError {
   constructor(variantId: string, requested: number, available: number) {
-    super('insufficient_stock', `Not enough stock for ${variantId}`, {
-      variantId,
-      requested,
-      available,
-    });
+    super(
+      'insufficient_stock',
+      `Insufficient stock for ${variantId}: requested ${requested}, available ${available}`,
+      {
+        variantId,
+        requested,
+        available,
+      },
+    );
   }
 }
 

@@ -33,9 +33,12 @@ import type {
   MovementsQuery,
   MovementsResponse,
   Order,
+  OrderLine,
   OrdersQuery,
   OrdersResponse,
   PreviewOrder,
+  ReceiveStockInput,
+  ReturnOrderLineInput,
   StockLotRow,
   StockRow,
   UnmatchedSku,
@@ -904,22 +907,47 @@ const orderSeed: Array<[string, string, Order['status'], string, number, number,
 ];
 
 let mockOrders: Order[] = orderSeed.map(
-  ([ref, channelId, status, customer, total, lineCount, cogs], index) => {
+  ([ref, channelId, status, customer, grandTotal, lineCount, cogs], index) => {
     const channel = MOCK_CHANNELS.find((c) => c.id === channelId);
-    const isManual = channel?.kind === 'pos' || channel?.kind === 'wholesale';
+    // Split the bill evenly over its lines so the line totals sum back to the
+    // grand total exactly; the first line absorbs the rounding remainder.
+    const share = Math.floor(grandTotal / lineCount);
+    const firstShare = grandTotal - share * (lineCount - 1);
+    const costShare = Math.floor(cogs / lineCount);
+    const firstCostShare = cogs - costShare * (lineCount - 1);
+    const lines: OrderLine[] = Array.from({ length: lineCount }, (_, lineIndex) => {
+      const variant = MOCK_VARIANTS[(index + lineIndex * 3) % MOCK_VARIANTS.length];
+      if (!variant) throw new Error('demo fixtures must keep at least one variant');
+      const lineTotal = lineIndex === 0 ? firstShare : share;
+      const totalCost = lineIndex === 0 ? firstCostShare : costShare;
+      return {
+        id: `oln_${ref}_${lineIndex + 1}`,
+        variantId: variant.id,
+        sku: variant.sku,
+        name: variant.name,
+        quantity: 1,
+        unitPrice: lineTotal,
+        discount: 0,
+        lineTotal,
+        unitCost: totalCost,
+        totalCost,
+      };
+    });
     return {
       id: `ord_${ref}`,
       orgId: DEMO_ORG_ID,
       channelId,
       channelName: channel?.name ?? 'ไม่ทราบช่องทาง',
       channelKind: channel?.kind ?? 'manual',
-      externalOrderId: isManual ? undefined : ref,
+      // Every bill carries its number here now, manual ones included.
+      externalOrderId: ref,
       status,
       customerName: customer,
       orderedAt: iso(Math.floor(index / 3), 10 + (index % 8), (index * 11) % 60),
-      total,
-      lineCount,
+      grandTotal,
       cogs,
+      margin: grandTotal - cogs,
+      lines,
     };
   },
 );
@@ -1207,23 +1235,57 @@ export const mockApi = {
       };
     });
 
+    // A local bill number in the same shape the API generates for manual channels.
+    const stamp = new Date().toISOString().slice(0, 10).replaceAll('-', '');
+    const serial = Math.floor(Math.random() * 10_000)
+      .toString()
+      .padStart(4, '0');
+    const grandTotal = lines.reduce((sum, l) => sum + l.lineTotal, 0);
+    const cogs = lines.reduce((sum, l) => sum + (l.totalCost ?? 0), 0);
+
     const order: Order = {
       id: `ord_${input.channelKind.toUpperCase()}_${Date.now()}`,
       orgId: DEMO_ORG_ID,
       channelId: channel.id,
       channelName: channel.name,
       channelKind: channel.kind,
+      externalOrderId: `POS-${stamp}-${serial}`,
       status: 'delivered',
       customerName: input.customerName ?? 'ลูกค้าหน้าร้าน',
       orderedAt: new Date().toISOString(),
-      total: lines.reduce((sum, l) => sum + l.lineTotal, 0),
-      lineCount: lines.length,
-      cogs: lines.reduce((sum, l) => sum + l.totalCost, 0),
+      grandTotal,
+      cogs,
+      margin: grandTotal - cogs,
       lines,
     };
     mockOrders = [order, ...mockOrders];
     return gate(order);
   },
+
+  receiveStock: (input: ReceiveStockInput): Movement => {
+    const variant = MOCK_VARIANTS.find((v) => v.id === input.variantId);
+    if (!variant) throw notFound('สินค้า');
+    return {
+      id: `mov_${Date.now()}`,
+      variantId: variant.id,
+      sku: variant.sku,
+      name: variant.name,
+      reason: 'purchase_in',
+      qtyDelta: input.qty,
+      // Demo stock never persists, so the balance is simply onHand + this receipt.
+      qtyAfter: variant.onHand + input.qty,
+      occurredAt: input.receivedAt ?? new Date().toISOString(),
+      warehouseId: 'wh_main',
+      note: input.note ?? (input.reference ? `รับเข้า ${input.reference}` : undefined),
+      unitCost: input.unitCost,
+      totalCost: input.unitCost * input.qty,
+    };
+  },
+
+  // FIFO restore runs server side; the demo has no cancel / return screen yet,
+  // so these only need to answer with the same shape the API would.
+  cancelOrder: (_id: string, _reason: string): Movement[] => [],
+  returnOrder: (_id: string, _lines: ReturnOrderLineInput[]): Movement[] => [],
 
   cogsReport: (query: CogsQuery = {}): CogsReportResponse => {
     const { role } = getDemoIdentity();

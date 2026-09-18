@@ -47,6 +47,14 @@ bun run lint    # biome check .
 Real auth replaces the body of that one middleware and nothing else.
 The middleware fails closed: with `DEMO_MODE` not set to `true` every request is rejected with 403.
 
+## Field visibility
+
+Every JSON response under `/api/v1` is redacted by `redactMiddleware` using `FIELD_POLICIES` in `packages/core/src/rbac.ts`.
+When adding a field that contains cost, add its key to `COST_KEYS`.
+For a tier price field, add it to `PRICE_TIER_KEYS`.
+Mark it `/** cost field */` or `/** tier field */` in the contract, and `contract-audit.test.ts` fails otherwise.
+`ok()` remains the required helper.
+
 ## Bindings
 
 | Binding | Type | Needed for | Create it |
@@ -94,6 +102,25 @@ export const thingRouter = new Hono<AppEnv>().get(
 4. Export it from `src/routes/index.ts` and mount it on `v1` in `src/index.ts`.
 5. Use `ok()` or `paginated()`, never `c.json()`, so cost hiding keeps working.
 6. Add a test to `src/index.test.ts`.
+
+## Contract
+
+New endpoints this wave (response shapes in `src/types/contract-pricing.ts`, mirrored in `apps/web/src/lib/api-types-pricing.ts`).
+Tier fields (`priceTierId`, `priceTierCode`, `priceTierName`, `tierPrices`, `priceSource`) are stripped for roles without `price_tier:read`.
+
+| Endpoint | Permission | Request | Response |
+| --- | --- | --- | --- |
+| `GET /api/v1/customers?q=&limit=` | `customer:read` | query: `q` 1-80 chars optional, `limit` 1-100 (default 50) | `CustomerView[]` |
+| `GET /api/v1/customers/:id` | `customer:read` | path: customer id | `CustomerView` |
+| `POST /api/v1/customers` | `customer:write` | body: `CustomerInput` | `CustomerView` (201) |
+| `PATCH /api/v1/customers/:id` | `customer:write` | body: `CustomerInput`, absent keys keep their value, `priceTierId: null` clears the tier | `CustomerView` |
+| `GET /api/v1/price-tiers` | `price_tier:read` | none | `PriceTierView[]` |
+| `GET /api/v1/price-tiers/matrix` | `price_tier:read` | none | `PriceMatrixRow[]` |
+| `PUT /api/v1/price-tiers/:id/prices` | `price_tier:write` | body: `{ prices: TierPriceCell[] }`, 1-500 cells, `price: null` deletes a cell | `{ upserted, deleted }` |
+| `GET /api/v1/pricing/resolve` | `price_tier:read` | query: `variantIds` comma-separated, plus `customerId` or `priceTierId` | `PriceResolutionView[]` in the requested order, unknown variant answers 404 |
+| `GET /api/v1/catalog/search?q=&limit=` | `stock:read` | query: `q` 1-120 chars, `limit` 1-50 (default 10) | `CatalogSearchRow[]` |
+| `POST /api/v1/listings` | `import:run` | body: `SaveListingInput` | `SaveListingResult` |
+| `GET /api/v1/listings?channelId=` | `stock:read` | query: `channelId` optional | `ListingView[]` |
 
 ## Error contract
 

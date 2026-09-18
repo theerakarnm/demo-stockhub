@@ -14,16 +14,22 @@ import { authMiddleware } from './middleware/auth';
 import { corsMiddleware } from './middleware/cors';
 import { dbMiddleware } from './middleware/db';
 import { errorHandler, notFoundHandler } from './middleware/error';
+import { redactMiddleware } from './middleware/redact';
 import { requestIdMiddleware } from './middleware/request-id';
 import {
+  catalogRouter,
   channelsRouter,
+  customersRouter,
   dashboardRouter,
   healthRouter,
   importsRouter,
   inventoryRouter,
+  listingsRouter,
   meRouter,
   movementsRouter,
   ordersRouter,
+  priceTiersRouter,
+  pricingRouter,
   reportsRouter,
 } from './routes';
 import type { AppEnv } from './types/app';
@@ -32,6 +38,7 @@ import type { AppEnv } from './types/app';
 const v1 = new Hono<AppEnv>()
   .use('*', authMiddleware)
   .use('*', dbMiddleware)
+  .use('*', redactMiddleware)
   .route('/me', meRouter)
   .route('/channels', channelsRouter)
   .route('/dashboard', dashboardRouter)
@@ -39,7 +46,12 @@ const v1 = new Hono<AppEnv>()
   .route('/imports', importsRouter)
   .route('/orders', ordersRouter)
   .route('/movements', movementsRouter)
-  .route('/reports', reportsRouter);
+  .route('/reports', reportsRouter)
+  .route('/catalog', catalogRouter)
+  .route('/listings', listingsRouter)
+  .route('/customers', customersRouter)
+  .route('/price-tiers', priceTiersRouter)
+  .route('/pricing', pricingRouter);
 
 const app = new Hono<AppEnv>();
 
