@@ -24,11 +24,14 @@ import type {
   MatchSkuInput,
   MatchSkuResult,
   MeResponse,
+  Movement,
   MovementsQuery,
   MovementsResponse,
   Order,
   OrdersQuery,
   OrdersResponse,
+  ReceiveStockInput,
+  ReturnOrderLineInput,
   VariantDetailResponse,
 } from './api-types';
 import { mockApi } from './mock-data';
@@ -161,6 +164,35 @@ export const api = {
     demo(
       () => mockApi.createOrder(input),
       () => request<Order>('/api/v1/orders', { method: 'POST', body: input }),
+    ),
+
+  /** POST /api/v1/inventory/receive - goods receipt; also requires cost:write. */
+  receiveStock: (input: ReceiveStockInput): Promise<Movement> =>
+    demo(
+      () => mockApi.receiveStock(input),
+      () => request<Movement>('/api/v1/inventory/receive', { method: 'POST', body: input }),
+    ),
+
+  /** POST /api/v1/orders/:id/cancel - the exact FIFO slices of the sale go back. */
+  cancelOrder: (id: string, reason: string): Promise<Movement[]> =>
+    demo(
+      () => mockApi.cancelOrder(id, reason),
+      () =>
+        request<Movement[]>(`/api/v1/orders/${encodeURIComponent(id)}/cancel`, {
+          method: 'POST',
+          body: { reason },
+        }),
+    ),
+
+  /** POST /api/v1/orders/:id/return - full or partial customer return. */
+  returnOrder: (id: string, lines: ReturnOrderLineInput[]): Promise<Movement[]> =>
+    demo(
+      () => mockApi.returnOrder(id, lines),
+      () =>
+        request<Movement[]>(`/api/v1/orders/${encodeURIComponent(id)}/return`, {
+          method: 'POST',
+          body: { lines },
+        }),
     ),
 
   /** GET /api/v1/reports/cogs - 403 for roles without cost:read. */

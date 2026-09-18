@@ -130,8 +130,9 @@ export default function NewOrderPage() {
             <p className="text-sm font-medium text-slate-900">บันทึกบิลเรียบร้อย</p>
             <p className="font-mono text-xs text-slate-500">{created.id}</p>
             <p className="text-sm text-slate-600">
-              ยอดรวม <span className="font-semibold text-slate-900">{baht(created.total)}</span> (
-              {created.lineCount} รายการ)
+              ยอดรวม{' '}
+              <span className="font-semibold text-slate-900">{baht(created.grandTotal)}</span> (
+              {created.lines.length} รายการ)
             </p>
             <div className="mt-2 flex items-center gap-2">
               <Button onClick={resetBill}>เปิดบิลใหม่</Button>

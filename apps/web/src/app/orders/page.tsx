@@ -47,7 +47,7 @@ const PAGE_SIZE = 25;
  * the cell shows.
  */
 const grossProfitOf = (order: Order): number | undefined =>
-  order.cogs === undefined ? undefined : order.total - order.cogs;
+  order.cogs === undefined ? undefined : order.grandTotal - order.cogs;
 
 export default function OrdersPage() {
   const { role, hasPermission, canReadCost } = useRole();
@@ -163,9 +163,9 @@ export default function OrdersPage() {
                     <Td className="whitespace-nowrap text-slate-600">
                       {formatDateTime(order.orderedAt)}
                     </Td>
-                    <Td numeric>{qty(order.lineCount)}</Td>
+                    <Td numeric>{qty(order.lines.length)}</Td>
                     <Td numeric className="font-medium text-slate-900">
-                      {baht(order.total)}
+                      {baht(order.grandTotal)}
                     </Td>
                     <Td numeric>
                       <CostValue value={order.cogs} />

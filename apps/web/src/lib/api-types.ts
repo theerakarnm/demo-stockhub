@@ -376,17 +376,17 @@ export interface Order {
   channelId: string;
   channelName: string;
   channelKind: ChannelKind;
-  /** Marketplace order number. Absent for POS / wholesale bills. */
-  externalOrderId?: string;
+  /** Bill number of record: a marketplace order number or a POS / wholesale bill number. */
+  externalOrderId: string;
   status: OrderStatus;
   customerName?: string;
   orderedAt: IsoDateTime;
-  total: MoneyAmount;
-  lineCount: number;
+  grandTotal: MoneyAmount;
   /** cost-gated */
   cogs?: MoneyAmount;
-  /** Only returned by the detail / create responses, not by the list. */
-  lines?: OrderLine[];
+  /** cost-gated - grandTotal minus cogs, as computed by the API. */
+  margin?: MoneyAmount;
+  lines: OrderLine[];
 }
 
 export interface OrdersQuery {
@@ -410,6 +410,27 @@ export interface CreateOrderInput {
     unitPrice?: MoneyAmount;
     discount?: MoneyAmount;
   }>;
+}
+
+/** POST /api/v1/inventory/receive - goods receipt; the server also requires cost:write. */
+export interface ReceiveStockInput {
+  variantId: string;
+  qty: number;
+  /** Satang. The received quantity opens a FIFO lot at this cost. */
+  unitCost: MoneyAmount;
+  /** Purchase reference, e.g. the PO number. */
+  reference?: string;
+  /** ISO datetime; omit to receive at "now". */
+  receivedAt?: string;
+  note?: string;
+}
+
+/** One line of POST /api/v1/orders/:id/return. */
+export interface ReturnOrderLineInput {
+  orderLineId: string;
+  quantity: number;
+  /** Damaged units restore their cost but never re-enter sellable stock. */
+  restock?: boolean;
 }
 
 // ---------------------------------------------------------------------------
