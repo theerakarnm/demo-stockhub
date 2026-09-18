@@ -47,6 +47,13 @@ bun run lint    # biome check .
 Real auth replaces the body of that one middleware and nothing else.
 The middleware fails closed: with `DEMO_MODE` not set to `true` every request is rejected with 403.
 
+## Field visibility
+
+Every JSON response under `/api/v1` is redacted by `src/middleware/redact.ts` using `FIELD_POLICIES` in `packages/core/src/rbac.ts`.
+When adding a field that contains cost, add its key to `COST_KEYS`, and for a tier price field add it to `PRICE_TIER_KEYS`.
+Mark the field `/** cost field */` or `/** tier field */` in `src/types/`, and `src/contract-audit.test.ts` fails otherwise.
+`ok()` remains the required helper for every successful response.
+
 ## Bindings
 
 | Binding | Type | Needed for | Create it |

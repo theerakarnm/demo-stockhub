@@ -40,9 +40,11 @@ When you pick up a task, grep for these markers first to see which stubs the req
    Convert to decimal only when displaying or exporting.
 
 4. **Cost hiding is enforced at the API**
-   Every response must go through `ok()` in `apps/api/src/lib/response.ts`, which calls `stripCost()` automatically.
+   Every JSON response under `/api/v1` is redacted by `redactMiddleware` using `FIELD_POLICIES` in `packages/core/src/rbac.ts`.
+   When adding a field that contains cost, add its key to `COST_KEYS`, and for a tier price field add it to `PRICE_TIER_KEYS`.
+   Mark the field `/** cost field */` or `/** tier field */` in the contract, and `contract-audit.test.ts` fails otherwise.
+   `ok()` remains the required helper for every successful response.
    Hiding it in React is only cosmetic, not security.
-   When adding a field that contains cost, also add that key to `COST_KEYS` in `packages/core/src/rbac.ts`.
 
 5. **FIFO must run in a single transaction**
    Read lots with `SELECT ... FOR UPDATE`, compute with pure functions, then write back, all inside one transaction.
