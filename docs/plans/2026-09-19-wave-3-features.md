@@ -114,17 +114,17 @@ Owner: child `wave3-track-j`, branch `wave3-track-j`, database `stockhub_j`.
 
 The aggregate recipe is already written in the mock comment at the top of `apps/api/src/routes/dashboard.ts`.
 
-- [ ] J1 Real dashboard summary
+- [x] J1 Real dashboard summary
   - Implement `GET /dashboard/summary` with the eight aggregates from the comment, run in one `Promise.all`.
   - `todaySold` uses `date_trunc('day', now() at time zone 'Asia/Bangkok')` so today means Bangkok today.
   - Wire `apps/web/src/app/(dashboard)/page.tsx` cards to the real data with loading, empty and error states. `stockValue` stays a cost field and must already be in `COST_KEYS` (verify, add only if missing).
   - Commit: `Compute the dashboard summary from stock data`
-- [ ] J2 Channel sales and variance
+- [x] J2 Channel sales and variance
   - New endpoint `GET /reports/channel-sales?days=7` in `apps/api/src/routes/reports.ts`: units and revenue grouped by channel from orders and order lines, permission `order:read`.
   - New endpoint `GET /reports/variance?days=7`: per variant and day totals for the reasons in decision D4, permission `stock:read`. This is the answer to ยอดคลาดเคลื่อนมาจากอะไร.
   - The dashboard page gains two sections: a sales per channel table and a recent variance table that links to `/movements`.
   - Extend the web client in a `reports` section, additive only. Commit: `Add channel sales and variance reports`
-- [ ] J3 Real COGS report
+- [x] J3 Real COGS report
   - Replace `mockCogsReport` in `apps/api/src/routes/reports.ts` with a real aggregation from `movement_lot_consumptions` joined to movements by day and channel, keeping the existing `cost:read` block at 403.
   - Wire `apps/web/src/app/reports/cogs/page.tsx` to the real data. Commit: `Compute the COGS report from real consumption`
 
