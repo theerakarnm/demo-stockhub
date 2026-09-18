@@ -3,8 +3,9 @@
 // Every field in src/types/contract*.ts marked with the "cost field" doc
 // comment must name a key in COST_KEYS, and every "tier field" marker a key in
 // PRICE_TIER_KEYS. The comment is how a reviewer sees that a field is stripped
-// by role; the reverse test below is the other half (Task 40, after the merge):
-// a set key with no marker fails, so a cost-bearing field cannot skip the sets.
+// by role. Since every Wave 2 track merged, the reverse direction is also
+// enforced here: a key that belongs to a set must carry its marker, so a new
+// field can never ship silently unredacted.
 
 import { describe, expect, test } from 'bun:test';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -18,22 +19,6 @@ const contractFiles = readdirSync(CONTRACT_DIR)
 
 const COST_MARKER = /\/\*\*\s*cost field[^*]*\*\/\s*\n\s*(\w+)\??:/g;
 const TIER_MARKER = /\/\*\* tier field \*\/\s*\n\s*(\w+)\??:/g;
-
-/** A field declaration line at any indent, e.g. `  cogs?: MoneyOnWire;`. */
-const FIELD_LINE = /^\s*(\w+)\??:/;
-
-/** The marker comment forms the forward regexes above accept, on one line. */
-const COST_MARKER_LINE = /^\/\*\*\s*cost field[^*]*\*\/$/;
-const TIER_MARKER_LINE = /^\/\*\*\s*tier field[^*]*\*\/$/;
-
-/** The nearest line above, blanks skipped - where the marker comment must sit. */
-const previousNonBlank = (lines: readonly string[], index: number): string => {
-  for (let i = index - 1; i >= 0; i -= 1) {
-    const line = lines[i];
-    if (line !== undefined && line.trim() !== '') return line.trim();
-  }
-  return '';
-};
 
 describe('contract audit', () => {
   test('every cost field marker names a key in COST_KEYS', () => {
@@ -54,25 +39,24 @@ describe('contract audit', () => {
     }
   });
 
-  test('every COST_KEYS and PRICE_TIER_KEYS key in a contract file carries its marker', () => {
+  test('no set key appears without its marker (reverse audit)', () => {
     for (const file of contractFiles) {
-      const lines = readFileSync(file, 'utf8').split('\n');
-      for (const [index, line] of lines.entries()) {
-        const match = FIELD_LINE.exec(line);
-        if (!match) continue;
-        const key = match[1] ?? '';
-        const above = previousNonBlank(lines, index);
+      const src = readFileSync(file, 'utf8');
+      const lines = src.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const field = /^\s*(\w+)\??:(?:\s|$)/.exec(lines[i] ?? '');
+        const key = field?.[1];
+        if (!key || (!COST_KEYS.has(key) && !PRICE_TIER_KEYS.has(key))) continue;
+        // The nearest previous non-blank line must carry the matching marker,
+        // so a reviewer sees the redaction intent right where the field lives.
+        let prev = i - 1;
+        while (prev >= 0 && (lines[prev] ?? '').trim() === '') prev--;
+        const prevLine = (lines[prev] ?? '').trim();
         if (COST_KEYS.has(key)) {
-          expect(
-            COST_MARKER_LINE.test(above),
-            `${file}:${index + 1}: cost key "${key}" lacks its /** cost field */ marker`,
-          ).toBe(true);
+          expect(prevLine.startsWith('/** cost field')).toBe(true);
         }
         if (PRICE_TIER_KEYS.has(key)) {
-          expect(
-            TIER_MARKER_LINE.test(above),
-            `${file}:${index + 1}: tier key "${key}" lacks its /** tier field */ marker`,
-          ).toBe(true);
+          expect(prevLine.startsWith('/** tier field')).toBe(true);
         }
       }
     }

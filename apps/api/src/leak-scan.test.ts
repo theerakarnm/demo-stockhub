@@ -30,11 +30,12 @@ export const LEAK_SCAN_DB_PATHS: readonly string[] = [
   `/api/v1/inventory/${SEED_IDS.variants.hoe}`,
   '/api/v1/movements',
   '/api/v1/orders',
-  // Task 40: the customer, tier, pricing and listing reads join the scan.
+  // Track P appended every route the Wave 2 tracks added.
   '/api/v1/customers',
+  `/api/v1/customers/${SEED_IDS.customers.walkIn}`,
   '/api/v1/price-tiers',
   '/api/v1/price-tiers/matrix',
-  `/api/v1/pricing/resolve?variantIds=${SEED_IDS.variants.hoe}`,
+  `/api/v1/pricing/resolve?variantIds=${SEED_IDS.variants.hoe},${SEED_IDS.variants.waterCan}&customerId=${SEED_IDS.customers.dealerNorth}`,
   '/api/v1/catalog/search?q=a',
   '/api/v1/listings',
 ];
