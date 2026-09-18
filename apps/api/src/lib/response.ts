@@ -14,7 +14,7 @@
  *     permission check, see middleware/require-permission.ts.
  */
 
-import { can, stripCost } from '@stockhub/core';
+import { can, redactForRole } from '@stockhub/core';
 import type { Context } from 'hono';
 import type { AppEnv } from '../types/app';
 import type { Page } from '../types/contract';
@@ -23,11 +23,11 @@ import type { Page } from '../types/contract';
 export const canSeeCost = (c: Context<AppEnv>): boolean => can(c.get('auth').role, 'cost:read');
 
 /**
- * Apply the role's cost visibility to any payload shape.
+ * Apply the role's full field policy (cost + tier pricing) to any payload shape.
  * Exported for unit tests and for streaming responses that cannot use ok().
  */
 export const applyCostVisibility = <T>(c: Context<AppEnv>, data: T): T =>
-  canSeeCost(c) ? data : stripCost(data);
+  redactForRole(c.get('auth').role, data);
 
 /** Success response. Use this instead of c.json() in every route. */
 export const ok = <T>(c: Context<AppEnv>, data: T, status: 200 | 201 = 200) =>
