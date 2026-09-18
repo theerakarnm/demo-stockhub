@@ -71,7 +71,7 @@ const parseError = async (response: Response): Promise<ApiError> => {
 };
 
 interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   /** JSON body. Mutually exclusive with `formData`. */
   body?: unknown;
   formData?: FormData;

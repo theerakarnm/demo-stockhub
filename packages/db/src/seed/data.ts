@@ -23,10 +23,13 @@ import type {
   NewBundleComponent,
   NewChannel,
   NewChannelListing,
+  NewCustomer,
   NewImportBatch,
   NewOrder,
   NewOrderLine,
   NewOrganization,
+  NewPriceTier,
+  NewPriceTierPrice,
   NewProduct,
   NewUser,
   NewVariant,
@@ -93,6 +96,18 @@ export const SEED_IDS = {
     bundleMow: '0f000000-0000-4000-8000-000000000018',
   },
   importBatch: '16000000-0000-4000-8000-000000000001',
+  priceTiers: {
+    retail: '17000000-0000-4000-8000-000000000001',
+    wholesale: '17000000-0000-4000-8000-000000000002',
+    dealer: '17000000-0000-4000-8000-000000000003',
+  },
+  customers: {
+    walkIn: '18000000-0000-4000-8000-000000000001',
+    farmShopA: '18000000-0000-4000-8000-000000000002',
+    farmShopB: '18000000-0000-4000-8000-000000000003',
+    coop: '18000000-0000-4000-8000-000000000004',
+    dealerNorth: '18000000-0000-4000-8000-000000000005',
+  },
   orders: {
     shopeeA: '13000000-0000-4000-8000-000000000001',
     lazadaB: '13000000-0000-4000-8000-000000000002',
@@ -1119,5 +1134,137 @@ export const SEED_ORDER_LINES: NewOrderLine[] = [
     unitPrice: fromBaht(95),
     discount: fromBaht(0),
     matchSource: 'sku_exact',
+  },
+];
+
+/**
+ * Price tiers, tier prices and shop customers.
+ *
+ * Tier prices are DERIVED from the variant selling prices above, so a price
+ * change in one place updates both lists consistently. The rounding is to a
+ * whole baht because Thai shopkeepers do not quote satang on a wholesale sheet.
+ *
+ * The water can, gloves and hat deliberately have NO tier price: the demo bill
+ * screen then shows a line falling back to the standard selling price, which is
+ * the exact case resolvePrice() documents.
+ */
+
+/** Standard selling prices (baht) of the seeded simple variants, keyed by SEED_IDS.variants. */
+const SEED_SELLING_BAHT: Record<keyof typeof SEED_IDS.variants, number> = {
+  hoe: 185,
+  spade: 165,
+  machete: 240,
+  pruner: 320,
+  mower: 4390,
+  blade: 95,
+  hose: 450,
+  nozzle: 135,
+  conn: 45,
+  fert50: 980,
+  fert25: 520,
+  fertOrg: 350,
+  sprayer: 890,
+  glove: 55,
+  hat: 120,
+  waterCan: 145,
+  bundleWater: 690,
+  bundleMow: 4790,
+};
+
+/** Wholesale = 10% off, dealer = 18% off, both rounded to a whole baht. */
+const tierPriceRow = (
+  variant: keyof typeof SEED_IDS.variants,
+  tierId: string,
+  factor: number,
+): NewPriceTierPrice => ({
+  orgId: SEED_IDS.org,
+  priceTierId: tierId,
+  variantId: SEED_IDS.variants[variant],
+  price: fromBaht(Math.round(SEED_SELLING_BAHT[variant] * factor)),
+});
+
+export const SEED_PRICE_TIERS: NewPriceTier[] = [
+  {
+    id: SEED_IDS.priceTiers.retail,
+    orgId: SEED_IDS.org,
+    code: 'retail',
+    name: 'ราคาปลีก',
+    sortOrder: 1,
+    isDefault: true,
+  },
+  {
+    id: SEED_IDS.priceTiers.wholesale,
+    orgId: SEED_IDS.org,
+    code: 'wholesale',
+    name: 'ราคาส่ง',
+    sortOrder: 2,
+    isDefault: false,
+  },
+  {
+    id: SEED_IDS.priceTiers.dealer,
+    orgId: SEED_IDS.org,
+    code: 'dealer',
+    name: 'ราคาตัวแทน',
+    sortOrder: 3,
+    isDefault: false,
+  },
+];
+
+const WHOLESALE_VARIANTS = [
+  'hoe',
+  'spade',
+  'machete',
+  'pruner',
+  'mower',
+  'blade',
+  'hose',
+  'nozzle',
+  'conn',
+  'fert50',
+  'fert25',
+  'sprayer',
+] as const;
+
+const DEALER_VARIANTS = ['hoe', 'spade', 'machete', 'mower', 'fert50', 'sprayer'] as const;
+
+export const SEED_PRICE_TIER_PRICES: NewPriceTierPrice[] = [
+  ...WHOLESALE_VARIANTS.map((variant) => tierPriceRow(variant, SEED_IDS.priceTiers.wholesale, 0.9)),
+  ...DEALER_VARIANTS.map((variant) => tierPriceRow(variant, SEED_IDS.priceTiers.dealer, 0.82)),
+];
+
+export const SEED_CUSTOMERS: NewCustomer[] = [
+  {
+    id: SEED_IDS.customers.walkIn,
+    orgId: SEED_IDS.org,
+    name: 'ลูกค้าหน้าร้าน',
+    // No tier and no contact: the generic walk-in buyer at standard prices.
+  },
+  {
+    id: SEED_IDS.customers.farmShopA,
+    orgId: SEED_IDS.org,
+    name: 'ร้านสวนเกษตรดี',
+    phone: '0811111111',
+    priceTierId: SEED_IDS.priceTiers.wholesale,
+  },
+  {
+    id: SEED_IDS.customers.farmShopB,
+    orgId: SEED_IDS.org,
+    name: 'ร้านเกษตรภัณฑ์บ้านนา',
+    phone: '0822222222',
+    priceTierId: SEED_IDS.priceTiers.wholesale,
+  },
+  {
+    id: SEED_IDS.customers.coop,
+    orgId: SEED_IDS.org,
+    name: 'สหกรณ์การเกษตรหนองบัว',
+    phone: '0833333333',
+    priceTierId: SEED_IDS.priceTiers.wholesale,
+  },
+  {
+    id: SEED_IDS.customers.dealerNorth,
+    orgId: SEED_IDS.org,
+    name: 'ตัวแทนภาคเหนือ',
+    phone: '0844444444',
+    priceTierId: SEED_IDS.priceTiers.dealer,
   },
 ];

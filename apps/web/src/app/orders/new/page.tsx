@@ -12,8 +12,10 @@ import type { CartLine, CartLinePatch } from '@/components/orders/cart';
 import { CartTable, cartTotalOf, discountOf, unitPriceOf } from '@/components/orders/cart';
 import type { ManualChannelKind } from '@/components/orders/channel-kind-toggle';
 import { ChannelKindToggle } from '@/components/orders/channel-kind-toggle';
+import { CustomerPicker } from '@/components/orders/customer-picker';
 import { OrderSummaryCard } from '@/components/orders/order-summary-card';
 import { ProductPicker } from '@/components/orders/product-picker';
+import { repriceLines } from '@/components/orders/reprice';
 import { useRole } from '@/components/role-provider';
 import {
   Button,
@@ -26,7 +28,9 @@ import {
   buttonClass,
 } from '@/components/ui';
 import { api } from '@/lib/api-client';
+import { pricingApi } from '@/lib/api-pricing';
 import type { CreateOrderInput, StockRow } from '@/lib/api-types';
+import type { CustomerView } from '@/lib/api-types-pricing';
 import { baht } from '@/lib/format';
 import { useMutation } from '@/lib/use-api';
 import { CheckCircle2, ShoppingCart } from 'lucide-react';
@@ -36,17 +40,37 @@ import { useCallback, useMemo, useState } from 'react';
 export default function NewOrderPage() {
   const { hasPermission } = useRole();
   const [channelKind, setChannelKind] = useState<ManualChannelKind>('pos');
+  const [customer, setCustomer] = useState<CustomerView | null>(null);
   const [customerName, setCustomerName] = useState('');
   const [note, setNote] = useState('');
   const [lines, setLines] = useState<CartLine[]>([]);
 
   const createOrder = useMutation((input: CreateOrderInput) => api.createOrder(input));
 
-  const addLine = useCallback((row: StockRow) => {
-    setLines((current) => {
-      if (current.some((line) => line.variantId === row.variantId)) return current;
-      return [
-        ...current,
+  /**
+   * Ask the API what every line on the bill should cost now, then apply the
+   * answers to the untouched lines. Cosmetic only: a failed resolve keeps the
+   * prices already on screen, and the cashier can always type over them.
+   */
+  const applyResolutions = useCallback(
+    (billLines: CartLine[], billCustomer: CustomerView | null) => {
+      if (billLines.length === 0) return;
+      const variantIds = billLines.map((line) => line.variantId);
+      void pricingApi
+        .resolve(variantIds, billCustomer ? { customerId: billCustomer.id } : {})
+        .then((resolutions) => setLines((current) => repriceLines(current, resolutions)))
+        .catch(() => {
+          // Keep the typed prices; the bill is still submittable.
+        });
+    },
+    [],
+  );
+
+  const addLine = useCallback(
+    (row: StockRow) => {
+      if (lines.some((line) => line.variantId === row.variantId)) return;
+      const next: CartLine[] = [
+        ...lines,
         {
           variantId: row.variantId,
           sku: row.sku,
@@ -57,10 +81,22 @@ export default function NewOrderPage() {
           // Selling price arrives in satang; the input works in baht.
           priceBaht: (row.sellingPrice / 100).toFixed(2),
           discountBaht: '0',
+          priceTouched: false,
         },
       ];
-    });
-  }, []);
+      setLines(next);
+      applyResolutions(next, customer);
+    },
+    [lines, customer, applyResolutions],
+  );
+
+  const pickCustomer = useCallback(
+    (picked: CustomerView | null) => {
+      setCustomer(picked);
+      applyResolutions(lines, picked);
+    },
+    [lines, applyResolutions],
+  );
 
   const patchLine = useCallback((variantId: string, patch: CartLinePatch) => {
     setLines((current) =>
@@ -74,6 +110,7 @@ export default function NewOrderPage() {
 
   const resetBill = useCallback(() => {
     setLines([]);
+    setCustomer(null);
     setCustomerName('');
     setNote('');
     createOrder.reset();
@@ -86,7 +123,8 @@ export default function NewOrderPage() {
   const submit = useCallback(() => {
     void createOrder.run({
       channelKind,
-      customerName: customerName.trim() || undefined,
+      // The picked customer wins; the free-text field is still the fallback.
+      customerName: customerName.trim() || customer?.name || undefined,
       note: note.trim() || undefined,
       lines: lines.map((line) => ({
         variantId: line.variantId,
@@ -95,7 +133,7 @@ export default function NewOrderPage() {
         discount: discountOf(line),
       })),
     });
-  }, [channelKind, createOrder, customerName, lines, note]);
+  }, [channelKind, createOrder, customer, customerName, lines, note]);
 
   // Guard first: `sales` may open a bill, `stock_staff` may not.
   if (!hasPermission('order:create')) {
@@ -164,6 +202,7 @@ export default function NewOrderPage() {
             <CardHeader title="ข้อมูลบิล" description="เลือกประเภทการขายและระบุลูกค้า (ถ้ามี)" />
             <CardBody className="space-y-4">
               <ChannelKindToggle value={channelKind} onChange={setChannelKind} />
+              <CustomerPicker customer={customer} onPick={pickCustomer} />
               <div className="grid gap-3 sm:grid-cols-2">
                 <Input
                   label="ชื่อลูกค้า (ไม่บังคับ)"

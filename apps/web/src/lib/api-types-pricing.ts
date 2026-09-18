@@ -1,15 +1,12 @@
 /**
- * Wire contract for customers, price tiers and price resolution.
+ * Wire types for customers, price tiers and price resolution.
  *
- * Marker rule (Global Constraints, audit-enforced by Tracks E and P): every
- * field whose name is in PRICE_TIER_KEYS carries `/** tier field *` + `/` on
- * the line above, the same way cost fields are marked in ./contract.ts. The
- * names themselves are: priceTierId, priceTierCode, priceTierName, tierPrices,
- * priceSource.
+ * Mirrors apps/api/src/types/contract-pricing.ts one to one; money stays an
+ * integer in satang on the wire and is formatted only at render time.
  */
 
-import type { PriceSource } from '@stockhub/core';
-import type { MoneyOnWire } from './contract';
+/** What price won for a variant (see resolvePrice in @stockhub/core). */
+export type PriceSource = 'tier' | 'default_tier' | 'selling_price';
 
 /** One row of the tier list shown in settings and in the customer form. */
 export interface PriceTierView {
@@ -27,11 +24,8 @@ export interface CustomerView {
   email?: string;
   note?: string;
   isActive: boolean;
-  /** tier field */
   priceTierId?: string;
-  /** tier field */
   priceTierCode?: string;
-  /** tier field */
   priceTierName?: string;
   createdAt: string;
 }
@@ -42,7 +36,6 @@ export interface CustomerInput {
   phone?: string;
   email?: string;
   note?: string;
-  /** tier field */
   priceTierId?: string | null;
   isActive?: boolean;
 }
@@ -50,7 +43,7 @@ export interface CustomerInput {
 /** One cell written by PUT /price-tiers/:id/prices; `price: null` deletes it. */
 export interface TierPriceCell {
   variantId: string;
-  price: MoneyOnWire | null;
+  price: number | null;
 }
 
 /** One row of the price matrix screen: a variant and its tier price cells. */
@@ -58,17 +51,19 @@ export interface PriceMatrixRow {
   variantId: string;
   sku: string;
   name: string;
-  sellingPrice: MoneyOnWire;
-  /** tier field */
-  tierPrices: Record<string, MoneyOnWire>;
+  sellingPrice: number;
+  tierPrices: Record<string, number>;
 }
 
-/** What price a bill line should use and WHY (see resolvePrice in @stockhub/core). */
+/** What price a bill line should use and WHY (the bill shows the reason). */
 export interface PriceResolutionView {
   variantId: string;
-  price: MoneyOnWire;
-  /** tier field */
+  price: number;
   priceSource: PriceSource;
-  /** tier field */
   priceTierId?: string;
+}
+
+export interface PutTierPricesResult {
+  upserted: number;
+  deleted: number;
 }
