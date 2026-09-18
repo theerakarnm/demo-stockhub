@@ -1,16 +1,18 @@
 /**
- * Zod schemas for customers, price tiers and price resolution.
+ * Zod schemas for the customer and price tier endpoints.
  *
- * Every customer-facing string is trimmed and length-capped at the boundary so
- * a fat-fingered paste cannot bloat the row. `priceTierId` is nullable on
- * input: sending null explicitly clears the tier and puts the customer back on
- * the standard selling price.
+ * Query params arrive as strings, so limit coerces. `priceTierId` accepts an
+ * explicit null (clear the tier on PATCH) and undefined (leave it alone).
  */
 
 import { z } from 'zod';
 import { idString } from './common';
 
-export const customerParam = z.object({ id: idString });
+export const customerParam = z.object({ customerId: idString });
+export type CustomerParam = z.infer<typeof customerParam>;
+
+export const tierParam = z.object({ tierId: idString });
+export type TierParam = z.infer<typeof tierParam>;
 
 export const customerInput = z.object({
   name: z.string().trim().min(1).max(160),
@@ -20,39 +22,35 @@ export const customerInput = z.object({
   priceTierId: idString.nullable().optional(),
   isActive: z.boolean().optional(),
 });
+export type CustomerInput = z.infer<typeof customerInput>;
 
 export const listCustomersQuery = z.object({
-  q: z.string().trim().min(1).max(80).optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(50),
+  q: z.string().trim().min(1).max(120).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
 });
+export type ListCustomersQuery = z.infer<typeof listCustomersQuery>;
 
-export const tierParam = z.object({ id: idString });
-
-/** One save on the matrix screen writes the whole edited row of one tier. */
 export const putTierPricesBody = z.object({
   prices: z
-    .array(
-      z.object({
-        variantId: idString,
-        // null deletes the cell so the variant falls back to the standard price.
-        price: z.number().int().nonnegative().nullable(),
-      }),
-    )
+    .array(z.object({ variantId: idString, price: z.number().int().nonnegative().nullable() }))
     .min(1)
     .max(500),
 });
+export type PutTierPricesBody = z.infer<typeof putTierPricesBody>;
 
-/** GET /pricing/resolve?variantIds=a,b,c&customerId=... or &priceTierId=... */
+// `variantIds` arrives as one comma separated query value, so it is split and
+// trimmed here; the pipe still enforces the id shape and the 1..200 bound.
 export const resolveQuery = z.object({
   variantIds: z
     .string()
-    .min(1)
-    .transform((value) =>
-      value
+    .transform((s) =>
+      s
         .split(',')
-        .map((id) => id.trim())
-        .filter((id) => id.length > 0),
-    ),
+        .map((v) => v.trim())
+        .filter(Boolean),
+    )
+    .pipe(z.array(idString).min(1).max(200)),
   customerId: idString.optional(),
   priceTierId: idString.optional(),
 });
+export type ResolveQuery = z.infer<typeof resolveQuery>;

@@ -1,10 +1,9 @@
 /**
- * Customers of the shop, used by the POS bill screen to pick a price tier.
+ * Customers of the wholesale counter.
  *
- * A customer is lightweight on purpose: a name, contact channels and the tier
- * that decides the bill prices. Marketplace buyers are NOT customers here -
- * they arrive as `orders.buyer_name` from an import and never get a row in
- * this table, so this table stays small and shop-owned.
+ * A customer may carry a price tier, which decides how bill lines are priced.
+ * Walk-in customers have no row at all - the bill screen just leaves the
+ * customer unset and pricing falls back to the default tier.
  */
 
 import { boolean, index, pgTable, text, uuid } from 'drizzle-orm/pg-core';
@@ -17,11 +16,11 @@ export const customers = pgTable(
   {
     id: primaryId(),
     orgId: orgIdColumn(),
-    /** Thai display name, e.g. 'ร้านสวนเกษตรดี'. */
+    /** Thai display name; the phone is how staff find them but is optional. */
     name: text('name').notNull(),
     phone: text('phone'),
     email: text('email'),
-    /** The tier that prices this customer's bills. Null = standard selling price. */
+    /** Priced by this tier when set; null means the default tier applies. */
     priceTierId: uuid('price_tier_id').references(() => priceTiers.id, {
       onDelete: 'set null',
     }),
@@ -30,7 +29,7 @@ export const customers = pgTable(
     ...timestamps,
   },
   (table) => [
-    // The picker searches by name; phone search is secondary.
+    // The customer list is searched by name most of the time.
     index('customers_org_name_idx').on(table.orgId, table.name),
     index('customers_org_idx').on(table.orgId),
   ],

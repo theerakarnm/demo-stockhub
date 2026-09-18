@@ -1,24 +1,25 @@
 'use client';
 
 /**
- * Create / edit form for one customer, rendered inside the /customers drawer.
+ * Create / edit form for one customer, shown inside the customers drawer.
  *
- * The tier <Select> is hidden for roles without `price_tier:read`: the server
- * rejects the field for them anyway, so the form never sends a value the
- * caller cannot see.
+ * The tier picker loads its options from pricingApi.listTiers() once per open;
+ * leaving it on the placeholder means "no tier", which the API reads as
+ * "price at the default tier". An explicit empty selection on edit sends
+ * priceTierId: null, which is how PATCH clears the column.
  */
 
 import { useRole } from '@/components/role-provider';
-import { Button, ErrorState, Input, Select, Skeleton } from '@/components/ui';
+import { Button, Input, Select, fieldClass } from '@/components/ui';
 import { customersApi, pricingApi } from '@/lib/api-pricing';
 import type { CustomerInput, CustomerView } from '@/lib/api-types-pricing';
 import { useApi, useMutation } from '@/lib/use-api';
-import { useCallback, useState } from 'react';
+import { useEffect, useState } from 'react';
 
-export interface CustomerFormProps {
+interface CustomerFormProps {
   /** When set the form edits this customer; otherwise it creates a new one. */
   customer: CustomerView | null;
-  onSaved: (customer: CustomerView) => void;
+  onSaved: () => void;
   onCancel: () => void;
 }
 
@@ -26,160 +27,104 @@ interface FormState {
   name: string;
   phone: string;
   email: string;
-  priceTierId: string;
+  tierId: string;
   note: string;
-  isActive: boolean;
 }
 
-const emptyForm = (): FormState => ({
-  name: '',
-  phone: '',
-  email: '',
-  priceTierId: '',
-  note: '',
-  isActive: true,
+const toFormState = (customer: CustomerView | null): FormState => ({
+  name: customer?.name ?? '',
+  phone: customer?.phone ?? '',
+  email: customer?.email ?? '',
+  tierId: customer?.priceTierId ?? '',
+  note: customer?.note ?? '',
 });
-
-const formOf = (customer: CustomerView): FormState => ({
-  name: customer.name,
-  phone: customer.phone ?? '',
-  email: customer.email ?? '',
-  priceTierId: customer.priceTierId ?? '',
-  note: customer.note ?? '',
-  isActive: customer.isActive,
-});
-
-/** Client-side mirror of the API zod rules, so the common typos never round-trip. */
-const validate = (form: FormState): string | null => {
-  if (form.name.trim().length === 0) return 'กรุณากรอกชื่อลูกค้า';
-  if (form.name.trim().length > 160) return 'ชื่อลูกค้ายาวเกิน 160 ตัวอักษร';
-  if (form.phone.trim().length > 32) return 'เบอร์โทรศัพท์ยาวเกิน 32 ตัวอักษร';
-  if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
-    return 'รูปแบบอีเมลไม่ถูกต้อง';
-  }
-  return null;
-};
 
 export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps) {
-  const { role, hasPermission } = useRole();
-  const canReadTiers = hasPermission('price_tier:read');
+  const { role } = useRole();
+  const { data: tiers } = useApi(() => pricingApi.listTiers(), [role]);
+  const [state, setState] = useState<FormState>(() => toFormState(customer));
+  const [validation, setValidation] = useState<string | null>(null);
 
-  const tiers = useApi(() => pricingApi.listTiers(), [role]);
-  const [form, setForm] = useState<FormState>(customer ? formOf(customer) : emptyForm());
-  const [formError, setFormError] = useState('');
+  // Re-seed the fields when the drawer switches between create and edit.
+  useEffect(() => {
+    setState(toFormState(customer));
+    setValidation(null);
+  }, [customer]);
 
   const save = useMutation((input: CustomerInput) =>
     customer ? customersApi.update(customer.id, input) : customersApi.create(input),
   );
 
-  const patchForm = useCallback((patch: Partial<FormState>) => {
-    setForm((current) => ({ ...current, ...patch }));
-  }, []);
+  const set = (patch: Partial<FormState>) => setState((cur) => ({ ...cur, ...patch }));
 
-  const submit = useCallback(() => {
-    const problem = validate(form);
-    if (problem) {
-      setFormError(problem);
+  const onSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (state.name.trim() === '') {
+      setValidation('กรุณากรอกชื่อลูกค้า');
       return;
     }
-    setFormError('');
-    // Empty strings stay absent on the wire: PATCH keeps the stored value then.
-    void save
-      .run({
-        name: form.name.trim(),
-        ...(form.phone.trim() ? { phone: form.phone.trim() } : {}),
-        ...(form.email.trim() ? { email: form.email.trim() } : {}),
-        ...(form.note.trim() ? { note: form.note.trim() } : {}),
-        ...(canReadTiers && form.priceTierId !== ''
-          ? { priceTierId: form.priceTierId || null }
-          : {}),
-        isActive: form.isActive,
-      })
-      .then((saved) => {
-        if (saved) onSaved(saved);
-      });
-  }, [form, save, canReadTiers, onSaved]);
-
-  if (canReadTiers && tiers.error) {
-    return <ErrorState error={tiers.error} onRetry={tiers.reload} />;
-  }
+    const saved = await save.run({
+      name: state.name.trim(),
+      phone: state.phone.trim() || undefined,
+      email: state.email.trim() || undefined,
+      note: state.note.trim() || undefined,
+      // '' means the placeholder; the API treats explicit null as "clear".
+      priceTierId: state.tierId || null,
+    });
+    if (saved) onSaved();
+  };
 
   return (
-    <form
-      className="space-y-4"
-      onSubmit={(event) => {
-        event.preventDefault();
-        submit();
-      }}
-    >
+    <form onSubmit={onSubmit} className="space-y-4 px-5 py-4">
       <Input
         label="ชื่อลูกค้า"
         name="name"
-        value={form.name}
-        onChange={(event) => patchForm({ name: event.target.value })}
+        value={state.name}
+        onChange={(event) => set({ name: event.target.value })}
         placeholder="เช่น ร้านสวนเกษตรดี"
         required
       />
-
       <Input
-        label="โทรศัพท์"
+        label="เบอร์โทร"
         name="phone"
-        type="tel"
-        value={form.phone}
-        onChange={(event) => patchForm({ phone: event.target.value })}
-        placeholder="08xxxxxxxx"
+        value={state.phone}
+        onChange={(event) => set({ phone: event.target.value })}
+        placeholder="053xxxxxx"
+        inputMode="tel"
       />
-
       <Input
         label="อีเมล"
         name="email"
         type="email"
-        value={form.email}
-        onChange={(event) => patchForm({ email: event.target.value })}
+        value={state.email}
+        onChange={(event) => set({ email: event.target.value })}
         placeholder="name@example.com"
       />
-
-      {canReadTiers ? (
-        tiers.loading && !tiers.data ? (
-          <Skeleton className="h-16 w-full" />
-        ) : (
-          <Select
-            label="ระดับราคา"
-            name="priceTierId"
-            value={form.priceTierId}
-            onChange={(event) => patchForm({ priceTierId: event.target.value })}
-            placeholder="ราคาปลีก (ค่าเริ่มต้น)"
-            options={(tiers.data ?? []).map((tier) => ({ value: tier.id, label: tier.name }))}
-          />
-        )
-      ) : null}
-
-      <Input
-        label="โน้ต"
-        name="note"
-        value={form.note}
-        onChange={(event) => patchForm({ note: event.target.value })}
-        placeholder="รายละเอียดเพิ่มเติม เช่น ที่อยู่จัดส่งประจำ"
-      />
-
       <Select
-        label="สถานะ"
-        name="isActive"
-        value={form.isActive ? 'active' : 'inactive'}
-        onChange={(event) => patchForm({ isActive: event.target.value === 'active' })}
-        options={[
-          { value: 'active', label: 'เปิดใช้งาน' },
-          { value: 'inactive', label: 'ปิดใช้งาน' },
-        ]}
+        label="ระดับราคา"
+        name="priceTierId"
+        value={state.tierId}
+        onChange={(event) => set({ tierId: event.target.value })}
+        placeholder="ราคาปลีก (ค่าเริ่มต้น)"
+        options={(tiers ?? []).map((tier) => ({ value: tier.id, label: tier.name }))}
       />
+      <div>
+        <label htmlFor="customer-note" className="mb-1 block text-xs font-medium text-slate-600">
+          โน้ต
+        </label>
+        <textarea
+          id="customer-note"
+          className={fieldClass('min-h-20')}
+          value={state.note}
+          onChange={(event) => set({ note: event.target.value })}
+          placeholder="เช่น ส่งของวันอังคาร-ศุกร์"
+        />
+      </div>
 
-      {formError || save.error ? (
-        <p className="text-sm text-red-600" role="alert">
-          {formError || save.error?.message}
-        </p>
-      ) : null}
+      {validation ? <p className="text-xs text-rose-600">{validation}</p> : null}
+      {save.error ? <p className="text-xs text-rose-600">{save.error.message}</p> : null}
 
-      <div className="flex justify-end gap-2 pt-2">
+      <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
         <Button type="button" variant="outline" onClick={onCancel}>
           ยกเลิก
         </Button>

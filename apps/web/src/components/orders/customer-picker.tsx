@@ -3,93 +3,104 @@
 /**
  * Customer picker for the bill screen.
  *
- * Search is debounced and answered by customersApi; picking a customer puts
- * the chip (name + tier) above the input so the cashier can see WHOSE price
- * the bill is using. "ลูกค้าทั่วไป" clears the pick: the bill then reprices
- * every line to the standard selling price.
+ * Search runs on the customers API with a deferred value (one request per
+ * pause in typing). Picking a customer collapses the search into a chip so the
+ * cashier always sees who the bill is for; "ลูกค้าทั่วไป" is the explicit
+ * walk-in choice and clears any pick.
  */
 
-import { useDebouncedValue } from '@/components/inventory/use-debounced-value';
 import { useRole } from '@/components/role-provider';
-import { Button, SearchInput } from '@/components/ui';
+import { SearchInput } from '@/components/ui';
 import { customersApi } from '@/lib/api-pricing';
 import type { CustomerView } from '@/lib/api-types-pricing';
 import { useApi } from '@/lib/use-api';
-import { UserX } from 'lucide-react';
-import { useState } from 'react';
+import { Tags, UserRound, X } from 'lucide-react';
+import { useDeferredValue, useState } from 'react';
 
-export interface CustomerPickerProps {
+interface CustomerPickerProps {
   customer: CustomerView | null;
-  onPick: (customer: CustomerView | null) => void;
+  onPick: (customer: CustomerView) => void;
+  onClear: () => void;
 }
 
-export function CustomerPicker({ customer, onPick }: CustomerPickerProps) {
+export function CustomerPicker({ customer, onPick, onClear }: CustomerPickerProps) {
   const { role } = useRole();
-  const [search, setSearch] = useState('');
-  const q = useDebouncedValue(search);
-  const { data, error, loading } = useApi(() => customersApi.list(q), [q, role]);
+  const [q, setQ] = useState('');
+  const deferredQ = useDeferredValue(q);
 
-  // Dormant customers stay listed for history but are not billable.
-  const matches = (data ?? []).filter((candidate) => candidate.isActive);
-  const tierOf = (candidate: CustomerView): string => candidate.priceTierName ?? 'ปลีก (ค่าเริ่มต้น)';
+  // Skip the request entirely once a customer is picked - the search is only
+  // for finding the next one.
+  const { data, loading } = useApi(
+    () => (customer ? Promise.resolve([]) : customersApi.list(deferredQ)),
+    [deferredQ, role, customer],
+  );
 
-  const pick = (candidate: CustomerView) => {
-    onPick(candidate);
-    setSearch('');
-  };
+  const results = (data ?? []).slice(0, 5);
+
+  if (customer) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 py-1 pl-2 pr-3 text-sm text-emerald-800">
+          <UserRound className="size-4 text-emerald-600" aria-hidden />
+          <span className="font-medium">{customer.name}</span>
+          <span className="inline-flex items-center gap-1 text-xs text-emerald-700/80">
+            <Tags className="size-3.5" aria-hidden />
+            {customer.priceTierName ?? 'ปลีก (ค่าเริ่มต้น)'}
+          </span>
+          <button
+            type="button"
+            onClick={onClear}
+            aria-label="ยกเลิกลูกค้าที่เลือก"
+            className="rounded-full p-0.5 text-emerald-600 hover:bg-emerald-100"
+          >
+            <X className="size-3.5" aria-hidden />
+          </button>
+        </span>
+        <button
+          type="button"
+          onClick={onClear}
+          className="text-xs text-slate-500 hover:text-slate-800"
+        >
+          ลูกค้าทั่วไป
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-2">
-      {customer ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-sm text-emerald-800">
-            <span className="font-medium">{customer.name}</span>
-            <span className="text-xs text-emerald-600">{tierOf(customer)}</span>
-          </span>
-          <Button variant="ghost" size="sm" onClick={() => onPick(null)}>
-            <UserX className="size-4" aria-hidden />
-            ลูกค้าทั่วไป
-          </Button>
-        </div>
-      ) : null}
-
       <SearchInput
-        value={search}
-        onChange={(event) => setSearch(event.target.value)}
-        placeholder="ค้นหาลูกค้าเพื่อใช้ราคาตามระดับ"
+        value={q}
+        onChange={(event) => setQ(event.target.value)}
+        placeholder="ค้นหาลูกค้า (ชื่อหรือเบอร์โทร)"
         aria-label="ค้นหาลูกค้า"
       />
-
-      {error ? (
-        <p className="text-xs text-red-600" role="alert">
-          {error.message}
-        </p>
-      ) : null}
-
-      {search.trim().length > 0 ? (
-        <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-200">
-          {loading && matches.length === 0 ? (
-            <p className="px-3 py-2 text-xs text-slate-500">กำลังค้นหา...</p>
-          ) : matches.length === 0 ? (
-            <p className="px-3 py-2 text-xs text-slate-500">ไม่พบลูกค้า</p>
-          ) : (
-            matches.map((candidate) => (
+      {loading && deferredQ !== '' ? <p className="text-xs text-slate-400">กำลังค้นหา...</p> : null}
+      {results.length > 0 ? (
+        <ul className="divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200">
+          {results.map((candidate) => (
+            <li key={candidate.id}>
               <button
-                key={candidate.id}
                 type="button"
-                className="flex w-full items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-slate-50"
-                onClick={() => pick(candidate)}
+                onClick={() => onPick(candidate)}
+                className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-slate-50"
               >
                 <span className="font-medium text-slate-900">{candidate.name}</span>
                 <span className="text-xs text-slate-500">
-                  {candidate.phone ? `${candidate.phone} - ` : ''}
-                  {tierOf(candidate)}
+                  {candidate.phone ?? ''} {candidate.priceTierName ?? ''}
                 </span>
               </button>
-            ))
-          )}
-        </div>
+            </li>
+          ))}
+        </ul>
       ) : null}
+      <button
+        type="button"
+        onClick={onClear}
+        className="text-xs text-slate-500 hover:text-slate-800"
+      >
+        ลูกค้าทั่วไป
+      </button>
     </div>
   );
 }

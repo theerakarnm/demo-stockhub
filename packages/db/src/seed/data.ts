@@ -1138,51 +1138,13 @@ export const SEED_ORDER_LINES: NewOrderLine[] = [
 ];
 
 /**
- * Price tiers, tier prices and shop customers.
+ * Wholesale price tiers.
  *
- * Tier prices are DERIVED from the variant selling prices above, so a price
- * change in one place updates both lists consistently. The rounding is to a
- * whole baht because Thai shopkeepers do not quote satang on a wholesale sheet.
- *
- * The water can, gloves and hat deliberately have NO tier price: the demo bill
- * screen then shows a line falling back to the standard selling price, which is
- * the exact case resolvePrice() documents.
+ * `retail` is the default tier with no price rows on purpose: it falls back to
+ * the variant selling price, which is exactly what retail means. The water
+ * can, gloves and hat deliberately have no tier price either, so the fallback
+ * path stays visible in the demo.
  */
-
-/** Standard selling prices (baht) of the seeded simple variants, keyed by SEED_IDS.variants. */
-const SEED_SELLING_BAHT: Record<keyof typeof SEED_IDS.variants, number> = {
-  hoe: 185,
-  spade: 165,
-  machete: 240,
-  pruner: 320,
-  mower: 4390,
-  blade: 95,
-  hose: 450,
-  nozzle: 135,
-  conn: 45,
-  fert50: 980,
-  fert25: 520,
-  fertOrg: 350,
-  sprayer: 890,
-  glove: 55,
-  hat: 120,
-  waterCan: 145,
-  bundleWater: 690,
-  bundleMow: 4790,
-};
-
-/** Wholesale = 10% off, dealer = 18% off, both rounded to a whole baht. */
-const tierPriceRow = (
-  variant: keyof typeof SEED_IDS.variants,
-  tierId: string,
-  factor: number,
-): NewPriceTierPrice => ({
-  orgId: SEED_IDS.org,
-  priceTierId: tierId,
-  variantId: SEED_IDS.variants[variant],
-  price: fromBaht(Math.round(SEED_SELLING_BAHT[variant] * factor)),
-});
-
 export const SEED_PRICE_TIERS: NewPriceTier[] = [
   {
     id: SEED_IDS.priceTiers.retail,
@@ -1210,61 +1172,106 @@ export const SEED_PRICE_TIERS: NewPriceTier[] = [
   },
 ];
 
+/** Selling prices in whole baht, mirrored from SEED_VARIANTS above. */
+const SEED_SELLING_BAHT: Record<string, number> = {
+  [SEED_IDS.variants.hoe]: 185,
+  [SEED_IDS.variants.spade]: 165,
+  [SEED_IDS.variants.machete]: 240,
+  [SEED_IDS.variants.pruner]: 320,
+  [SEED_IDS.variants.mower]: 4390,
+  [SEED_IDS.variants.blade]: 95,
+  [SEED_IDS.variants.hose]: 450,
+  [SEED_IDS.variants.nozzle]: 135,
+  [SEED_IDS.variants.conn]: 45,
+  [SEED_IDS.variants.fert50]: 980,
+  [SEED_IDS.variants.fert25]: 520,
+  [SEED_IDS.variants.sprayer]: 890,
+};
+
+/** Tier price for one variant: the discounted baht figure, in satang. */
+const tierBaht = (variantId: string, factor: number): number => {
+  const baht = SEED_SELLING_BAHT[variantId];
+  if (baht === undefined) throw new Error(`No seed selling price for variant ${variantId}`);
+  return fromBaht(Math.round(baht * factor));
+};
+
 const WHOLESALE_VARIANTS = [
-  'hoe',
-  'spade',
-  'machete',
-  'pruner',
-  'mower',
-  'blade',
-  'hose',
-  'nozzle',
-  'conn',
-  'fert50',
-  'fert25',
-  'sprayer',
+  SEED_IDS.variants.hoe,
+  SEED_IDS.variants.spade,
+  SEED_IDS.variants.machete,
+  SEED_IDS.variants.pruner,
+  SEED_IDS.variants.mower,
+  SEED_IDS.variants.blade,
+  SEED_IDS.variants.hose,
+  SEED_IDS.variants.nozzle,
+  SEED_IDS.variants.conn,
+  SEED_IDS.variants.fert50,
+  SEED_IDS.variants.fert25,
+  SEED_IDS.variants.sprayer,
 ] as const;
 
-const DEALER_VARIANTS = ['hoe', 'spade', 'machete', 'mower', 'fert50', 'sprayer'] as const;
+const DEALER_VARIANTS = [
+  SEED_IDS.variants.hoe,
+  SEED_IDS.variants.spade,
+  SEED_IDS.variants.machete,
+  SEED_IDS.variants.mower,
+  SEED_IDS.variants.fert50,
+  SEED_IDS.variants.sprayer,
+] as const;
+
+const seedTierPriceId = (base: string, index: number): string =>
+  `${base}-0000-4000-8000-${String(index + 1).padStart(12, '0')}`;
 
 export const SEED_PRICE_TIER_PRICES: NewPriceTierPrice[] = [
-  ...WHOLESALE_VARIANTS.map((variant) => tierPriceRow(variant, SEED_IDS.priceTiers.wholesale, 0.9)),
-  ...DEALER_VARIANTS.map((variant) => tierPriceRow(variant, SEED_IDS.priceTiers.dealer, 0.82)),
+  ...WHOLESALE_VARIANTS.map((variantId, index) => ({
+    id: seedTierPriceId('11000000', index),
+    orgId: SEED_IDS.org,
+    priceTierId: SEED_IDS.priceTiers.wholesale,
+    variantId,
+    price: tierBaht(variantId, 0.9),
+  })),
+  ...DEALER_VARIANTS.map((variantId, index) => ({
+    id: seedTierPriceId('12000000', index),
+    orgId: SEED_IDS.org,
+    priceTierId: SEED_IDS.priceTiers.dealer,
+    variantId,
+    price: tierBaht(variantId, 0.82),
+  })),
 ];
 
+/** Wholesale counter customers. Walk-in has no tier and no phone on purpose. */
 export const SEED_CUSTOMERS: NewCustomer[] = [
   {
     id: SEED_IDS.customers.walkIn,
     orgId: SEED_IDS.org,
     name: 'ลูกค้าหน้าร้าน',
-    // No tier and no contact: the generic walk-in buyer at standard prices.
   },
   {
     id: SEED_IDS.customers.farmShopA,
     orgId: SEED_IDS.org,
     name: 'ร้านสวนเกษตรดี',
-    phone: '0811111111',
+    phone: '053111001',
     priceTierId: SEED_IDS.priceTiers.wholesale,
   },
   {
     id: SEED_IDS.customers.farmShopB,
     orgId: SEED_IDS.org,
     name: 'ร้านเกษตรภัณฑ์บ้านนา',
-    phone: '0822222222',
+    phone: '053111002',
     priceTierId: SEED_IDS.priceTiers.wholesale,
   },
   {
     id: SEED_IDS.customers.coop,
     orgId: SEED_IDS.org,
     name: 'สหกรณ์การเกษตรหนองบัว',
-    phone: '0833333333',
+    phone: '053111003',
     priceTierId: SEED_IDS.priceTiers.wholesale,
   },
   {
     id: SEED_IDS.customers.dealerNorth,
     orgId: SEED_IDS.org,
     name: 'ตัวแทนภาคเหนือ',
-    phone: '0844444444',
+    phone: '053111004',
     priceTierId: SEED_IDS.priceTiers.dealer,
   },
 ];

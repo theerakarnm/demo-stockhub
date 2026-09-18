@@ -1,14 +1,13 @@
 /**
- * Price tiers and their per-variant price rows.
+ * Wholesale price tiers.
  *
- * A tier ('retail', 'wholesale', 'dealer') groups the wholesale prices a shop
- * quotes to regular trade customers. The prices themselves live in
- * `price_tier_prices`, one row per (tier, variant) cell.
+ * price_tiers = a named price level ('ราคาปลีก', 'ราคาส่ง', 'ราคาตัวแทน')
+ * price_tier_prices = one tier price for one variant, in satang
  *
- * The matrix is deliberately sparse: a shop with hundreds of SKUs only fills
- * the cells it cares about, and every missing cell falls back through
- * resolvePrice() in @stockhub/core. That is why the table has no default
- * value trick and no inherited rows.
+ * A tier never stores a percentage: the shop types the actual price per
+ * variant, so every bill shows a number the cashier can defend. Missing rows
+ * are normal - price resolution falls back to the default tier and then to the
+ * variant selling price. See packages/core/src/services/pricing/resolve-price.ts.
  */
 
 import { sql } from 'drizzle-orm';
@@ -31,24 +30,19 @@ export const priceTiers = pgTable(
   {
     id: primaryId(),
     orgId: orgIdColumn(),
-    /** URL/enum-like stable key used by code and seeds, e.g. 'wholesale'. */
+    /** Short machine name used in codes and URLs ('retail', 'wholesale'). */
     code: text('code').notNull(),
-    /** Thai display name, e.g. 'ราคาส่ง'. */
+    /** Thai display name shown on screens ('ราคาส่ง'). */
     name: text('name').notNull(),
-    /** Display order, cheapest tier first. */
+    /** Ordering in pickers; lower comes first. */
     sortOrder: integer('sort_order').notNull().default(0),
-    /**
-     * Exactly one tier per org should be default (enforced in the repo, not by
-     * a partial unique index, so the flip to a new default is one update).
-     * Cells missing from this tier resolve to the variant selling price.
-     */
+    /** The default tier prices customers who have no tier of their own. */
     isDefault: boolean('is_default').notNull().default(false),
     ...timestamps,
   },
   (table) => [
     // A code identifies exactly one tier inside a tenant.
     uniqueIndex('price_tiers_org_code_uq').on(table.orgId, table.code),
-    index('price_tiers_org_idx').on(table.orgId),
     check('price_tiers_code_format', sql`${table.code} ~ '^[a-z0-9_]{2,32}$'`),
   ],
 );
@@ -64,15 +58,14 @@ export const priceTierPrices = pgTable(
     variantId: uuid('variant_id')
       .notNull()
       .references(() => variants.id, { onDelete: 'cascade' }),
-    /** Unit price in satang for this variant inside this tier. */
+    /** Tier price per unit in satang. Missing rows fall back in the resolver. */
     price: money('price').notNull(),
     ...timestamps,
   },
   (table) => [
-    // One cell of the tier matrix. Upserts key on this pair.
+    // One price per (tier, variant); editing replaces the row through upsert.
     uniqueIndex('price_tier_prices_tier_variant_uq').on(table.priceTierId, table.variantId),
     index('price_tier_prices_org_idx').on(table.orgId),
-    index('price_tier_prices_variant_idx').on(table.variantId),
     check('price_tier_prices_price_nonneg', sql`${table.price} >= 0`),
   ],
 );

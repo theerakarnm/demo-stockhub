@@ -10,9 +10,9 @@
  */
 
 import { Button, Table, TableWrap, Tbody, Td, Th, Thead, Tr } from '@/components/ui';
-import type { PriceSource } from '@/lib/api-types-pricing';
 import { cn } from '@/lib/cn';
 import { baht, qty } from '@/lib/format';
+import type { PriceSource } from '@stockhub/core';
 import { fromBaht } from '@stockhub/core';
 import { Trash2 } from 'lucide-react';
 import { priceSourceLabel } from './reprice';
@@ -28,12 +28,9 @@ export interface CartLine {
   /** Raw text of the baht input. Empty string while the user clears the field. */
   priceBaht: string;
   discountBaht: string;
-  /**
-   * True once the cashier typed this line's price by hand: repricing on a
-   * customer change must never overwrite it.
-   */
+  /** True once the cashier edited the price by hand: repricing must skip it. */
   priceTouched: boolean;
-  /** Why the price is what it is; set by repricing, absent for hand-edited lines. */
+  /** Where the current price came from, set by the last reprice. */
   priceSource?: PriceSource;
 }
 
@@ -136,7 +133,7 @@ export function CartTable({ lines, onPatch, onRemove }: CartTableProps) {
                     className={cn(NUMBER_INPUT, 'w-24', NEUTRAL_INPUT)}
                   />
                   {line.priceSource ? (
-                    <p className="mt-0.5 text-[11px] text-slate-400">
+                    <p className="mt-1 max-w-32 text-[11px] leading-tight text-slate-400">
                       {priceSourceLabel(line.priceSource)}
                     </p>
                   ) : null}

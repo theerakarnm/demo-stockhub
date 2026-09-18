@@ -61,8 +61,8 @@ const TABLES_TO_CLEAR = [
   'import_batches',
   'channel_listings',
   'bundle_components',
-  'price_tier_prices',
   'customers',
+  'price_tier_prices',
   'price_tiers',
   'variants',
   'products',
@@ -159,10 +159,6 @@ const main = async (): Promise<void> => {
     console.info(`  lots        ${SEED_OPENING_STOCK.length} (${units} units)`);
     console.info(`  stock value ${(value / 100).toLocaleString('th-TH')} baht`);
     console.info(`  orders      ${SEED_ORDERS.length} (${SEED_ORDER_LINES.length} lines)`);
-    console.info(
-      `  tiers       ${SEED_PRICE_TIERS.length} (${SEED_PRICE_TIER_PRICES.length} tier prices)`,
-    );
-    console.info(`  customers   ${SEED_CUSTOMERS.length}`);
   } finally {
     await client.end();
   }

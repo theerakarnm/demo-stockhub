@@ -14,5 +14,6 @@ export * from './services/costing/fifo';
 export * from './services/import/matching';
 export * from './services/stock/bundle';
 export * from './services/stock/movement';
+export * from './services/pricing/resolve-price';
 export * from './services/stock/order-transition';
 export * from './services/pricing/resolve-price';

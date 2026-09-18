@@ -1,5 +1,5 @@
 {
-  "id": "47d93b65-a0b5-40b8-96c0-9f403bfe4e54",
+  "id": "a0d6126e-d807-47ed-8dc0-7b324aff91a9",
   "prevId": "6af0159c-0007-449b-881f-01e7eb864bdb",
   "version": "7",
   "dialect": "postgresql",
@@ -2691,21 +2691,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "price_tier_prices_variant_idx": {
-          "name": "price_tier_prices_variant_idx",
-          "columns": [
-            {
-              "expression": "variant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -2836,21 +2821,6 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "price_tiers_org_idx": {
-          "name": "price_tiers_org_idx",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}

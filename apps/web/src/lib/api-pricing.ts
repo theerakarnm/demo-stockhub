@@ -1,9 +1,11 @@
 /**
- * The pricing + customers endpoint catalog: one function per API route,
- * mirroring apps/api D5-D6. Same split as api-client.ts - fetch, headers and
- * envelope handling live in api-core; this file only maps endpoint to request.
+ * Customer and pricing endpoints (Tasks 31-32).
  *
- * In demo mode `demo()` routes every call to src/lib/mock-pricing.ts instead.
+ *   pricingApi   - tiers, the price matrix, the batched save and resolution
+ *   customersApi - the wholesale counter's customer book
+ *
+ * The fetch/envelope/header plumbing lives in ./api-core; in demo mode every
+ * call is answered by ./mock-pricing instead.
  */
 
 import { demo, request, withQuery } from './api-core';
@@ -33,7 +35,7 @@ export const pricingApi = {
       () => request<PriceMatrixRow[]>('/api/v1/price-tiers/matrix'),
     ),
 
-  /** PUT /api/v1/price-tiers/:id/prices */
+  /** PUT /api/v1/price-tiers/:tierId/prices */
   putTierPrices: (tierId: string, cells: TierPriceCell[]): Promise<PutTierPricesResult> =>
     demo(
       () => mockPricing.putTierPrices(tierId, cells),
@@ -44,9 +46,9 @@ export const pricingApi = {
         }),
     ),
 
-  /** GET /api/v1/pricing/resolve?variantIds=a,b&customerId=... or &priceTierId=... */
+  /** GET /api/v1/pricing/resolve?variantIds=a,b&customerId=x|priceTierId=y */
   resolve: (
-    variantIds: readonly string[],
+    variantIds: string[],
     options: { customerId?: string; priceTierId?: string } = {},
   ): Promise<PriceResolutionView[]> =>
     demo(

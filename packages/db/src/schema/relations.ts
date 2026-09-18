@@ -210,11 +210,10 @@ export const importBatchesRelations = relations(importBatches, ({ one, many }) =
 export const priceTiersRelations = relations(priceTiers, ({ many }) => ({
   prices: many(priceTierPrices),
   customers: many(customers),
-  orders: many(orders),
 }));
 
 export const priceTierPricesRelations = relations(priceTierPrices, ({ one }) => ({
-  tier: one(priceTiers, {
+  priceTier: one(priceTiers, {
     fields: [priceTierPrices.priceTierId],
     references: [priceTiers.id],
   }),
@@ -225,10 +224,6 @@ export const priceTierPricesRelations = relations(priceTierPrices, ({ one }) => 
 }));
 
 export const customersRelations = relations(customers, ({ one, many }) => ({
-  organization: one(organizations, {
-    fields: [customers.orgId],
-    references: [organizations.id],
-  }),
   priceTier: one(priceTiers, {
     fields: [customers.priceTierId],
     references: [priceTiers.id],

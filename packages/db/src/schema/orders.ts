@@ -54,9 +54,11 @@ export const orders = pgTable(
     importBatchId: uuid('import_batch_id').references(() => importBatches.id, {
       onDelete: 'set null',
     }),
-    /** Shop customer behind a POS/wholesale bill. Null for marketplace imports. */
-    customerId: uuid('customer_id').references(() => customers.id, { onDelete: 'set null' }),
-    /** Tier snapshot at bill time, kept even if the customer's tier changes later. */
+    /** Wholesale customer on a POS / wholesale bill. Null for marketplace orders. */
+    customerId: uuid('customer_id').references(() => customers.id, {
+      onDelete: 'set null',
+    }),
+    /** Tier the bill was priced with, kept for evidence when tiers change. */
     priceTierId: uuid('price_tier_id').references(() => priceTiers.id, {
       onDelete: 'set null',
     }),

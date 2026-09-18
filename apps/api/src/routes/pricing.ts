@@ -1,13 +1,13 @@
 /**
- * Price resolution route.
+ * Price resolution routes.
  *
- *   GET /resolve?variantIds=a,b,c&customerId=... or &priceTierId=...
+ *   GET /resolve?variantIds=a,b&customerId=x|priceTierId=y  (price_tier:read)
  *
- * The bill screen calls this once per customer change and reprices every line
- * from the answer, so the endpoint resolves the whole list in one round trip
- * and keeps the requested order.
+ * One price per variant in the order requested; the bill screen calls this
+ * whenever the picked customer changes or a line is added.
  */
 
+import { asCustomerId, asPriceTierId, asVariantId } from '@stockhub/core';
 import { Hono } from 'hono';
 import { ok } from '../lib/response';
 import { validate } from '../lib/validate';
@@ -21,5 +21,15 @@ export const pricingRouter = new Hono<AppEnv>().get(
   '/resolve',
   requirePermission('price_tier:read'),
   validate('query', resolveQuery),
-  async (c) => ok(c, await resolvePrices(serviceContext(c), c.req.valid('query'))),
+  async (c) => {
+    const query = c.req.valid('query');
+    return ok(
+      c,
+      await resolvePrices(serviceContext(c), {
+        variantIds: query.variantIds.map(asVariantId),
+        ...(query.customerId !== undefined && { customerId: asCustomerId(query.customerId) }),
+        ...(query.priceTierId !== undefined && { priceTierId: asPriceTierId(query.priceTierId) }),
+      }),
+    );
+  },
 );

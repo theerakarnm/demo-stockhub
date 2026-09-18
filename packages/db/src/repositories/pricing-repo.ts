@@ -1,11 +1,11 @@
 /**
- * Price tier reads and the tier-price matrix.
+ * Price tiers and the per-tier price matrix.
  *
- * The matrix is sparse by design (see src/schema/pricing.ts), so a read of a
- * customer's prices is really a read of a FEW cells plus fallbacks. That is why
- * `getTierPriceMap` takes tier ids (plural): the caller asks for the customer's
- * tier AND the default tier in one query and falls back in memory, in
- * resolvePrice(), not with extra round trips.
+ * Reads feed the price resolver in @stockhub/core: the caller loads the tiers,
+ * the default tier and a `tierPriceKey`-keyed price map, then resolves each
+ * bill line in memory. `upsertTierPrices` is the write path behind the matrix
+ * screen: one batched upsert for set prices and one batched delete for cleared
+ * cells, so saving a whole column is two statements, not 500.
  */
 
 import {
@@ -13,11 +13,20 @@ import {
   type PriceTierId,
   type Satang,
   type VariantId,
+  asPriceTierId,
+  asVariantId,
+  satang,
   tierPriceKey,
 } from '@stockhub/core';
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, getTableColumns, inArray, sql } from 'drizzle-orm';
 import type { DbExecutor } from '../client';
-import { type PriceTier, priceTierPrices, priceTiers, products, variants } from '../schema';
+import {
+  type PriceTier,
+  type PriceTierPrice,
+  priceTierPrices,
+  priceTiers,
+  variants,
+} from '../schema';
 
 export const listTiers = async (exec: DbExecutor, params: { orgId: OrgId }): Promise<PriceTier[]> =>
   exec
@@ -26,7 +35,6 @@ export const listTiers = async (exec: DbExecutor, params: { orgId: OrgId }): Pro
     .where(eq(priceTiers.orgId, params.orgId))
     .orderBy(asc(priceTiers.sortOrder), asc(priceTiers.name));
 
-/** The one tier flagged default, or undefined when the org has not picked one. */
 export const getDefaultTier = async (
   exec: DbExecutor,
   params: { orgId: OrgId },
@@ -39,93 +47,80 @@ export const getDefaultTier = async (
   return row;
 };
 
-export interface GetTierPriceMapInput {
-  orgId: OrgId;
-  tierIds: readonly PriceTierId[];
-  /** Narrow the cells to these variants; omit for every variant of the tiers. */
-  variantIds?: readonly VariantId[];
-}
-
-/**
- * Tier price cells keyed by `tierPriceKey(tierId, variantId)`, the same key
- * format resolvePrice() looks up. Empty tier list short-circuits to an empty
- * map because `inArray` with an empty array is invalid SQL.
- */
+/** Tier prices keyed by `tierPriceKey(tierId, variantId)`, ready for resolvePrice. */
 export const getTierPriceMap = async (
   exec: DbExecutor,
-  params: GetTierPriceMapInput,
+  params: { orgId: OrgId; tierIds: readonly PriceTierId[]; variantIds?: readonly VariantId[] },
 ): Promise<Map<string, Satang>> => {
   const map = new Map<string, Satang>();
+  // inArray with an empty list is invalid SQL, so answer before querying.
   if (params.tierIds.length === 0) return map;
   const filters = [
     eq(priceTierPrices.orgId, params.orgId),
     inArray(priceTierPrices.priceTierId, [...params.tierIds]),
   ];
-  if (params.variantIds && params.variantIds.length > 0) {
+  if (params.variantIds) {
+    if (params.variantIds.length === 0) return map;
     filters.push(inArray(priceTierPrices.variantId, [...params.variantIds]));
   }
   const rows = await exec
     .select({
-      priceTierId: priceTierPrices.priceTierId,
+      tierId: priceTierPrices.priceTierId,
       variantId: priceTierPrices.variantId,
       price: priceTierPrices.price,
     })
     .from(priceTierPrices)
     .where(and(...filters));
   for (const row of rows) {
-    map.set(
-      tierPriceKey(row.priceTierId as PriceTierId, row.variantId as VariantId),
-      row.price as Satang,
-    );
+    map.set(tierPriceKey(asPriceTierId(row.tierId), asVariantId(row.variantId)), satang(row.price));
   }
   return map;
 };
 
-export interface UpsertTierPriceCell {
+export interface TierPriceCellInput {
   variantId: VariantId;
-  /** `null` deletes the cell so the variant falls back again. */
+  /** null clears the tier price so resolution falls back for that variant. */
   price: Satang | null;
 }
 
-export interface UpsertTierPricesInput {
-  orgId: OrgId;
-  priceTierId: PriceTierId;
-  prices: readonly UpsertTierPriceCell[];
-}
-
 /**
- * Write one tier's row of the matrix. Cells with a price are upserted in one
- * batch insert; cells with null are deleted in one statement. The tier must
- * belong to the org - the where clause guarantees an id from another tenant
- * cannot be written through.
+ * Save one tier column of the matrix: upsert the set prices, delete the
+ * cleared ones. Returns how many rows each statement touched.
  */
 export const upsertTierPrices = async (
   exec: DbExecutor,
-  params: UpsertTierPricesInput,
+  params: { orgId: OrgId; priceTierId: PriceTierId; prices: readonly TierPriceCellInput[] },
 ): Promise<{ upserted: number; deleted: number }> => {
-  const toUpsert = params.prices.filter((cell) => cell.price !== null);
-  const toDelete = params.prices.filter((cell) => cell.price === null);
+  const isSetPrice = (cell: TierPriceCellInput): cell is { variantId: VariantId; price: Satang } =>
+    cell.price !== null;
+
+  const toUpsert = params.prices.filter(isSetPrice);
+  const toDelete = params.prices
+    .filter((cell) => cell.price === null)
+    .map((cell) => cell.variantId);
+
+  let upserted = 0;
+  let deleted = 0;
 
   if (toUpsert.length > 0) {
-    await exec
+    const rows = await exec
       .insert(priceTierPrices)
       .values(
         toUpsert.map((cell) => ({
           orgId: params.orgId,
           priceTierId: params.priceTierId,
           variantId: cell.variantId,
-          price: cell.price as Satang,
+          price: cell.price,
         })),
       )
       .onConflictDoUpdate({
         target: [priceTierPrices.priceTierId, priceTierPrices.variantId],
-        // `excluded.price` is the incoming row's value; raw SQL because drizzle
-        // has no typed alias for the conflict source.
         set: { price: sql`excluded.price`, updatedAt: new Date() },
-      });
+      })
+      .returning({ id: priceTierPrices.id });
+    upserted = rows.length;
   }
 
-  let deleted = 0;
   if (toDelete.length > 0) {
     const rows = await exec
       .delete(priceTierPrices)
@@ -133,74 +128,62 @@ export const upsertTierPrices = async (
         and(
           eq(priceTierPrices.orgId, params.orgId),
           eq(priceTierPrices.priceTierId, params.priceTierId),
-          inArray(
-            priceTierPrices.variantId,
-            toDelete.map((cell) => cell.variantId),
-          ),
+          inArray(priceTierPrices.variantId, toDelete),
         ),
       )
       .returning({ id: priceTierPrices.id });
     deleted = rows.length;
   }
 
-  return { upserted: toUpsert.length, deleted };
+  return { upserted, deleted };
 };
 
-export interface PriceMatrixRow {
+export interface MatrixRow {
   variantId: VariantId;
   sku: string;
   name: string;
   sellingPrice: Satang;
-  /** Sparse map: only tiers that actually have a cell for this variant. */
-  prices: Partial<Record<PriceTierId, Satang>>;
+  /** Tier id -> price in satang; a missing key means "no price set on the tier". */
+  prices: Record<string, number>;
 }
 
-/**
- * Every ACTIVE variant with the tier prices it has, for the matrix screen.
- * Two plain queries (variants, then all cells) merge in memory - a join would
- * duplicate every variant row per tier and the org has at most a handful of
- * tiers, so the merge is trivially cheap.
- */
+/** Every active variant with its tier prices - the whole matrix in one call. */
 export const listMatrix = async (
   exec: DbExecutor,
   params: { orgId: OrgId },
-): Promise<PriceMatrixRow[]> => {
+): Promise<MatrixRow[]> => {
   const variantRows = await exec
     .select({
       id: variants.id,
       sku: variants.sku,
-      productName: products.name,
-      variantName: variants.name,
+      name: variants.name,
       sellingPrice: variants.sellingPrice,
     })
     .from(variants)
-    .innerJoin(products, eq(products.id, variants.productId))
     .where(and(eq(variants.orgId, params.orgId), eq(variants.isActive, true)))
     .orderBy(asc(variants.sku));
 
-  const cellRows = await exec
+  const priceRows = await exec
     .select({
-      priceTierId: priceTierPrices.priceTierId,
       variantId: priceTierPrices.variantId,
+      tierId: priceTierPrices.priceTierId,
       price: priceTierPrices.price,
     })
     .from(priceTierPrices)
     .where(eq(priceTierPrices.orgId, params.orgId));
 
-  const cellsByVariant = new Map<VariantId, PriceMatrixRow['prices']>();
-  for (const cell of cellRows) {
-    const variantId = cell.variantId as VariantId;
-    const tierId = cell.priceTierId as PriceTierId;
-    const prices = cellsByVariant.get(variantId) ?? {};
-    prices[tierId] = cell.price as Satang;
-    cellsByVariant.set(variantId, prices);
+  const pricesByVariant = new Map<string, Record<string, number>>();
+  for (const row of priceRows) {
+    const bucket = pricesByVariant.get(row.variantId) ?? {};
+    bucket[row.tierId] = row.price;
+    pricesByVariant.set(row.variantId, bucket);
   }
 
   return variantRows.map((row) => ({
-    variantId: row.id as VariantId,
+    variantId: asVariantId(row.id),
     sku: row.sku,
-    name: row.variantName ? `${row.productName} (${row.variantName})` : row.productName,
-    sellingPrice: row.sellingPrice as Satang,
-    prices: cellsByVariant.get(row.id as VariantId) ?? {},
+    name: row.name ?? '',
+    sellingPrice: satang(row.sellingPrice),
+    prices: pricesByVariant.get(row.id) ?? {},
   }));
 };

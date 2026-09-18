@@ -1,16 +1,15 @@
 /**
- * Customer routes.
+ * Customer endpoints.
  *
- *   GET    /             list + search (`customer:read`)
- *   GET    /:id          one customer (`customer:read`)
- *   POST   /             create (`customer:write`, 201)
- *   PATCH  /:id          partial update (`customer:write`)
+ *   GET   /            list + search (customer:read)
+ *   GET   /:customerId one customer          (customer:read)
+ *   POST  /            create                (customer:write)
+ *   PATCH /:customerId edit                  (customer:write)
  *
- * Everything tier-shaped in the response (priceTierId/Code/Name) is stripped
- * centrally for roles without `price_tier:read`; see types/contract-pricing.ts.
+ * Tier fields ride along in the payload; stripping them for roles without
+ * price_tier:read is Track E's job in the response layer, not this router's.
  */
 
-import { asCustomerId } from '@stockhub/core';
 import { Hono } from 'hono';
 import { ok } from '../lib/response';
 import { validate } from '../lib/validate';
@@ -29,21 +28,27 @@ export const customersRouter = new Hono<AppEnv>()
   .get('/', requirePermission('customer:read'), validate('query', listCustomersQuery), async (c) =>
     ok(c, await listCustomers(serviceContext(c), c.req.valid('query'))),
   )
-  .get('/:id', requirePermission('customer:read'), validate('param', customerParam), async (c) => {
-    const { id } = c.req.valid('param');
-    // Branded ids (asCustomerId) are created at this boundary, never inside a service.
-    return ok(c, await getCustomer(serviceContext(c), asCustomerId(id)));
-  })
+  .get(
+    '/:customerId',
+    requirePermission('customer:read'),
+    validate('param', customerParam),
+    async (c) => ok(c, await getCustomer(serviceContext(c), c.req.valid('param').customerId)),
+  )
   .post('/', requirePermission('customer:write'), validate('json', customerInput), async (c) =>
     ok(c, await createCustomer(serviceContext(c), c.req.valid('json')), 201),
   )
   .patch(
-    '/:id',
+    '/:customerId',
     requirePermission('customer:write'),
     validate('param', customerParam),
     validate('json', customerInput),
-    async (c) => {
-      const { id } = c.req.valid('param');
-      return ok(c, await updateCustomer(serviceContext(c), asCustomerId(id), c.req.valid('json')));
-    },
+    async (c) =>
+      ok(
+        c,
+        await updateCustomer(
+          serviceContext(c),
+          c.req.valid('param').customerId,
+          c.req.valid('json'),
+        ),
+      ),
   );

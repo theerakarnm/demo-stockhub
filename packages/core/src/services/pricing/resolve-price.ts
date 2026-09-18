@@ -1,54 +1,51 @@
 /**
- * Price resolution rules: what unit price a bill line should use for a variant,
- * given the customer's tier and the shop's tier price rows.
+ * Price resolution rules for wholesale tiers.
  *
- * A shop with hundreds of SKUs never fills every cell of the tier matrix, so a
- * missing tier price must fall back to a price the cashier can still defend.
- * The returned `source` lets the bill screen show why a line has its price,
- * e.g. "ราคาขายมาตรฐาน (ยังไม่ตั้งราคาส่ง)".
+ * Why: a shop with 400 SKUs never fills every tier price, so a missing tier
+ * price must fall back to something the cashier can defend. The source is
+ * returned so the bill screen can show "ราคาปลีก (ยังไม่ตั้งราคาส่ง)".
  */
 
 import type { PriceTierId, VariantId } from '../../domain/ids';
 import type { Satang } from '../../domain/money';
 
 export const PRICE_SOURCES = ['tier', 'default_tier', 'selling_price'] as const;
+
 export type PriceSource = (typeof PRICE_SOURCES)[number];
 
 export interface PriceResolution {
   variantId: VariantId;
   price: Satang;
   source: PriceSource;
-  /** Set when the winning price came from a tier row (the customer's or the default tier). */
   tierId?: PriceTierId;
 }
 
-/** Composite key of one tier-price cell; repositories use the same format. */
+/** Key of one tier price inside a tier price map, e.g. "tier_ws::var_hoe". */
 export const tierPriceKey = (tierId: PriceTierId, variantId: VariantId): string =>
   `${tierId}::${variantId}`;
 
-export interface ResolvePriceInput {
+export const resolvePrice = (input: {
   variantId: VariantId;
-  /** The standard selling price, the last fallback of the chain. */
   sellingPrice: Satang;
-  /** The customer's own tier, if the customer has one. */
   tierId?: PriceTierId;
-  /** The org's default tier (e.g. retail), applied when the customer has none or misses a cell. */
   defaultTierId?: PriceTierId;
   tierPrices: ReadonlyMap<string, Satang>;
-}
-
-export const resolvePrice = (input: ResolvePriceInput): PriceResolution => {
+}): PriceResolution => {
   const { variantId, sellingPrice, tierId, defaultTierId, tierPrices } = input;
+
   if (tierId !== undefined) {
-    const hit = tierPrices.get(tierPriceKey(tierId, variantId));
-    if (hit !== undefined) return { variantId, price: hit, source: 'tier', tierId };
+    const price = tierPrices.get(tierPriceKey(tierId, variantId));
+    if (price !== undefined) {
+      return { variantId, price, source: 'tier', tierId };
+    }
   }
-  // A customer whose own tier lacks the cell still deserves the default tier's
-  // price, but never twice: the same tier is not consulted again.
+  // The default tier is only consulted when it differs from the customer
+  // tier; otherwise the miss above already proved this variant has no price.
   if (defaultTierId !== undefined && defaultTierId !== tierId) {
-    const hit = tierPrices.get(tierPriceKey(defaultTierId, variantId));
-    if (hit !== undefined)
-      return { variantId, price: hit, source: 'default_tier', tierId: defaultTierId };
+    const price = tierPrices.get(tierPriceKey(defaultTierId, variantId));
+    if (price !== undefined) {
+      return { variantId, price, source: 'default_tier', tierId: defaultTierId };
+    }
   }
   return { variantId, price: sellingPrice, source: 'selling_price' };
 };

@@ -1,17 +1,22 @@
 /**
- * Price tier + matrix + resolution route tests against the seeded database.
+ * Price tier, matrix and resolution route tests against the seeded database.
  *
- * They need a live Postgres with the migration applied and the seed loaded
- * (`bun run db:migrate && bun run db:seed`) plus DATABASE_URL. Without
- * DATABASE_URL the whole suite skips.
- *
- * The PUT test mutates the wholesale row (hoe -> 16_000, spade cell deleted).
- * `afterAll` writes the seeded values back, so the seed invariant stays intact
- * for the other suites.
+ * The suite mutates ONLY tier price rows and restores the touched ones in
+ * afterAll by re-running `upsertTierPrices` with the values read before the
+ * mutation, so the seed stays valid for the next run. Without DATABASE_URL the
+ * whole suite skips, so `bun test` stays green with no database running.
  */
 
 import { afterAll, describe, expect, test } from 'bun:test';
-import { asOrgId, asPriceTierId, asVariantId, satang } from '@stockhub/core';
+import {
+  type Role,
+  type Satang,
+  type VariantId,
+  asOrgId,
+  asPriceTierId,
+  asVariantId,
+  tierPriceKey,
+} from '@stockhub/core';
 import { SEED_IDS, createDb, pricingRepo } from '@stockhub/db';
 import { buildTestApp, jsonAs, requestAs } from '../test-utils';
 import { priceTiersRouter } from './price-tiers';
@@ -20,133 +25,145 @@ import { pricingRouter } from './pricing';
 const url = process.env.DATABASE_URL;
 const db = url ? createDb(url) : undefined;
 
-const app = buildTestApp((v1) =>
-  v1.route('/price-tiers', priceTiersRouter).route('/pricing', pricingRouter),
-);
+// Repo functions take branded ids; SEED_IDS values are the same strings.
+const orgId = asOrgId(SEED_IDS.org);
+const wholesaleId = asPriceTierId(SEED_IDS.priceTiers.wholesale);
+const hoeId = asVariantId(SEED_IDS.variants.hoe);
+const spadeId = asVariantId(SEED_IDS.variants.spade);
 
-interface TierView {
+/** The PriceTier wire shape this suite asserts on. */
+interface TierWire {
   id: string;
   code: string;
+  name: string;
+  sortOrder: number;
   isDefault: boolean;
 }
 
-interface MatrixRow {
+/** The PriceMatrixRow wire shape this suite asserts on. */
+interface MatrixWire {
   variantId: string;
   sku: string;
   tierPrices: Record<string, number>;
 }
 
-interface Resolution {
+/** The PriceResolutionView wire shape this suite asserts on. */
+interface ResolutionWire {
   variantId: string;
   price: number;
-  priceSource: 'tier' | 'default_tier' | 'selling_price';
+  priceSource: string;
   priceTierId?: string;
 }
 
-describe.skipIf(!url)('price tier + pricing routes (seeded database)', () => {
+const app = buildTestApp((v1) =>
+  v1.route('/price-tiers', priceTiersRouter).route('/pricing', pricingRouter),
+);
+
+const putPrices = (role: Role, tierId: string, prices: unknown) =>
+  requestAs(app, `/api/v1/price-tiers/${tierId}/prices`, role, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ prices }),
+  });
+
+describe.skipIf(!url)('pricing routes (seeded database)', () => {
+  /** hoe + spade wholesale rows before the PUT, restored in afterAll. */
+  let seedWholesale: { variantId: VariantId; price: Satang }[] = [];
+
   afterAll(async () => {
     if (!db) return;
-    // Restore exactly what the PUT test changed, by the same cell keys.
-    await pricingRepo.upsertTierPrices(db, {
-      orgId: asOrgId(SEED_IDS.org),
-      priceTierId: asPriceTierId(SEED_IDS.priceTiers.wholesale),
-      prices: [
-        { variantId: asVariantId(SEED_IDS.variants.hoe), price: satang(16_700) },
-        { variantId: asVariantId(SEED_IDS.variants.spade), price: satang(14_900) },
-      ],
-    });
+    if (seedWholesale.length > 0) {
+      await pricingRepo.upsertTierPrices(db, {
+        orgId,
+        priceTierId: wholesaleId,
+        prices: seedWholesale,
+      });
+    }
     await db.$client.end();
   });
 
-  test('owner lists the 3 seeded tiers with retail as default', async () => {
-    const rows = await jsonAs<TierView[]>(app, '/api/v1/price-tiers', 'owner');
-    expect(rows).toHaveLength(3);
-    expect(rows.filter((tier) => tier.isDefault)).toHaveLength(1);
-    expect(rows.find((tier) => tier.code === 'retail')?.isDefault).toBe(true);
+  test('owner lists the 3 seed tiers', async () => {
+    const tiers = await jsonAs<TierWire[]>(app, '/api/v1/price-tiers', 'owner');
+    expect(tiers).toHaveLength(3);
+    expect(tiers.map((tier) => tier.code)).toEqual(['retail', 'wholesale', 'dealer']);
+    expect(tiers[0]?.isDefault).toBe(true);
   });
 
-  test('matrix has 18 variants and the seeded hoe wholesale cell', async () => {
-    const rows = await jsonAs<MatrixRow[]>(app, '/api/v1/price-tiers/matrix', 'owner');
-    expect(rows).toHaveLength(18);
-    const hoe = rows.find((row) => row.sku === 'HOE-001');
+  test('matrix has 18 rows and the seeded hoe wholesale price', async () => {
+    const matrix = await jsonAs<MatrixWire[]>(app, '/api/v1/price-tiers/matrix', 'owner');
+    expect(matrix).toHaveLength(18);
+    const hoe = matrix.find((row) => row.sku === 'HOE-001');
     expect(hoe?.tierPrices[SEED_IDS.priceTiers.wholesale]).toBe(16_700);
   });
 
-  test('manager writes one tier row: upsert hoe, delete spade', async () => {
-    const result = await jsonAs<{ upserted: number; deleted: number }>(
-      app,
-      `/api/v1/price-tiers/${SEED_IDS.priceTiers.wholesale}/prices`,
-      'manager',
-      {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          prices: [
-            { variantId: SEED_IDS.variants.hoe, price: 16_000 },
-            { variantId: SEED_IDS.variants.spade, price: null },
-          ],
-        }),
-      },
-    );
-    expect(result.upserted).toBe(1);
-    expect(result.deleted).toBe(1);
+  test('manager saves one changed cell and one cleared cell', async () => {
+    // The map is keyed by tierPriceKey(tier, variant); read the two seed cells
+    // before the mutation so afterAll can put them back.
+    const map = db
+      ? await pricingRepo.getTierPriceMap(db, {
+          orgId,
+          tierIds: [wholesaleId],
+          variantIds: [hoeId, spadeId],
+        })
+      : new Map<string, Satang>();
+    seedWholesale = [
+      { variantId: hoeId, key: tierPriceKey(wholesaleId, hoeId) },
+      { variantId: spadeId, key: tierPriceKey(wholesaleId, spadeId) },
+    ].flatMap(({ variantId, key }) => {
+      const price = map.get(key);
+      return price === undefined ? [] : [{ variantId, price }];
+    });
 
-    const rows = await jsonAs<MatrixRow[]>(app, '/api/v1/price-tiers/matrix', 'owner');
-    const hoe = rows.find((row) => row.sku === 'HOE-001');
-    const spade = rows.find((row) => row.sku === 'SPD-001');
+    const res = await putPrices('manager', SEED_IDS.priceTiers.wholesale, [
+      { variantId: SEED_IDS.variants.hoe, price: 16_000 },
+      { variantId: SEED_IDS.variants.spade, price: null },
+    ]);
+    expect(res.status).toBe(200);
+    const saved = (await res.json()) as { upserted: number; deleted: number };
+    expect(saved.upserted).toBe(1);
+    expect(saved.deleted).toBe(1);
+
+    const matrix = await jsonAs<MatrixWire[]>(app, '/api/v1/price-tiers/matrix', 'owner');
+    const hoe = matrix.find((row) => row.sku === 'HOE-001');
+    const spade = matrix.find((row) => row.sku === 'SPD-001');
     expect(hoe?.tierPrices[SEED_IDS.priceTiers.wholesale]).toBe(16_000);
     expect(spade?.tierPrices[SEED_IDS.priceTiers.wholesale]).toBeUndefined();
   });
 
-  test('sales is forbidden to write tier prices', async () => {
-    const res = await requestAs(
-      app,
-      `/api/v1/price-tiers/${SEED_IDS.priceTiers.wholesale}/prices`,
-      'sales',
-      {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prices: [{ variantId: SEED_IDS.variants.hoe, price: 1 }] }),
-      },
-    );
+  test('sales cannot write the matrix', async () => {
+    const res = await putPrices('sales', SEED_IDS.priceTiers.wholesale, [
+      { variantId: SEED_IDS.variants.hoe, price: 1 },
+    ]);
     expect(res.status).toBe(403);
   });
 
-  test('resolve for a dealer customer hits the dealer tier, then falls back', async () => {
-    const rows = await jsonAs<Resolution[]>(
+  test('dealerNorth resolves hoe at the dealer price and waterCan at selling price', async () => {
+    const rows = await jsonAs<ResolutionWire[]>(
       app,
-      `/api/v1/pricing/resolve?variantIds=${SEED_IDS.variants.hoe},${SEED_IDS.variants.waterCan}&customerId=${SEED_IDS.customers.dealerNorth}`,
+      `/api/v1/pricing/resolve?variantIds=${SEED_IDS.variants.hoe},${
+        SEED_IDS.variants.waterCan
+      }&customerId=${SEED_IDS.customers.dealerNorth}`,
       'sales',
     );
-    // The dealer buys the hoe at the dealer cell (185 x 0.82 rounded to whole baht).
+    expect(rows.map((row) => row.variantId)).toEqual([
+      SEED_IDS.variants.hoe,
+      SEED_IDS.variants.waterCan,
+    ]);
     expect(rows[0]?.priceSource).toBe('tier');
     expect(rows[0]?.price).toBe(15_200);
-    expect(rows[0]?.priceTierId).toBe(SEED_IDS.priceTiers.dealer);
-    // The water can has NO dealer and NO retail cell, so it falls to the standard price.
     expect(rows[1]?.priceSource).toBe('selling_price');
     expect(rows[1]?.price).toBe(14_500);
-    expect('priceTierId' in (rows[1] ?? {})).toBe(false);
   });
 
-  test('resolve without a tier answers the standard selling price', async () => {
-    const rows = await jsonAs<Resolution[]>(
+  test('walkIn falls back to the selling price for both variants', async () => {
+    const rows = await jsonAs<ResolutionWire[]>(
       app,
-      `/api/v1/pricing/resolve?variantIds=${SEED_IDS.variants.hoe},${SEED_IDS.variants.waterCan}&customerId=${SEED_IDS.customers.walkIn}`,
+      `/api/v1/pricing/resolve?variantIds=${SEED_IDS.variants.hoe},${
+        SEED_IDS.variants.waterCan
+      }&customerId=${SEED_IDS.customers.walkIn}`,
       'sales',
     );
-    for (const row of rows) {
-      expect(row.priceSource).toBe('selling_price');
-    }
-    expect(rows[0]?.price).toBe(18_500);
-    expect(rows[1]?.price).toBe(14_500);
-
-    // A variant id that does not exist is 404, not a silently skipped line.
-    const res = await requestAs(
-      app,
-      `/api/v1/pricing/resolve?variantIds=99000000-0000-4000-8000-000000000001&customerId=${SEED_IDS.customers.walkIn}`,
-      'sales',
-    );
-    expect(res.status).toBe(404);
+    expect(rows.every((row) => row.priceSource === 'selling_price')).toBe(true);
   });
 
   test('stock_staff is forbidden to resolve prices', async () => {

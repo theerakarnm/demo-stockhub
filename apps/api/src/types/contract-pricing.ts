@@ -1,17 +1,16 @@
 /**
- * Wire contract for customers, price tiers and price resolution.
+ * Wire contract for customer and price tier endpoints.
  *
- * Marker rule (Global Constraints, audit-enforced by Tracks E and P): every
- * field whose name is in PRICE_TIER_KEYS carries `/** tier field *` + `/` on
- * the line above, the same way cost fields are marked in ./contract.ts. The
- * names themselves are: priceTierId, priceTierCode, priceTierName, tierPrices,
- * priceSource.
+ * Task 5 reserved the module; Tasks 31 and 32 own the interfaces here. Every
+ * field whose name is in PRICE_TIER_KEYS (packages/core/src/rbac.ts) carries
+ * the `/** tier field *` doc comment on the line above: that is how a reviewer
+ * sees that the field is stripped for a role without `price_tier:read` once
+ * Track E lands.
  */
 
 import type { PriceSource } from '@stockhub/core';
 import type { MoneyOnWire } from './contract';
 
-/** One row of the tier list shown in settings and in the customer form. */
 export interface PriceTierView {
   id: string;
   code: string;
@@ -36,7 +35,6 @@ export interface CustomerView {
   createdAt: string;
 }
 
-/** Body of POST /customers and PATCH /customers/:id. `priceTierId: null` clears the tier. */
 export interface CustomerInput {
   name: string;
   phone?: string;
@@ -47,13 +45,11 @@ export interface CustomerInput {
   isActive?: boolean;
 }
 
-/** One cell written by PUT /price-tiers/:id/prices; `price: null` deletes it. */
 export interface TierPriceCell {
   variantId: string;
   price: MoneyOnWire | null;
 }
 
-/** One row of the price matrix screen: a variant and its tier price cells. */
 export interface PriceMatrixRow {
   variantId: string;
   sku: string;
@@ -63,7 +59,6 @@ export interface PriceMatrixRow {
   tierPrices: Record<string, MoneyOnWire>;
 }
 
-/** What price a bill line should use and WHY (see resolvePrice in @stockhub/core). */
 export interface PriceResolutionView {
   variantId: string;
   price: MoneyOnWire;

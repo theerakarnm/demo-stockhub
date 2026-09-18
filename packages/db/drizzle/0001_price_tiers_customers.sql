@@ -46,8 +46,6 @@ CREATE INDEX "customers_org_name_idx" ON "customers" USING btree ("org_id","name
 CREATE INDEX "customers_org_idx" ON "customers" USING btree ("org_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "price_tier_prices_tier_variant_uq" ON "price_tier_prices" USING btree ("price_tier_id","variant_id");--> statement-breakpoint
 CREATE INDEX "price_tier_prices_org_idx" ON "price_tier_prices" USING btree ("org_id");--> statement-breakpoint
-CREATE INDEX "price_tier_prices_variant_idx" ON "price_tier_prices" USING btree ("variant_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "price_tiers_org_code_uq" ON "price_tiers" USING btree ("org_id","code");--> statement-breakpoint
-CREATE INDEX "price_tiers_org_idx" ON "price_tiers" USING btree ("org_id");--> statement-breakpoint
 ALTER TABLE "orders" ADD CONSTRAINT "orders_customer_id_customers_id_fk" FOREIGN KEY ("customer_id") REFERENCES "public"."customers"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "orders" ADD CONSTRAINT "orders_price_tier_id_price_tiers_id_fk" FOREIGN KEY ("price_tier_id") REFERENCES "public"."price_tiers"("id") ON DELETE set null ON UPDATE no action;

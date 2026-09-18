@@ -1,36 +1,17 @@
 /**
- * Repricing the bill when the customer (and so the tier) changes.
+ * Pure repricing for the bill screen.
  *
- * The cashier is the boss of a line they edited by hand: `priceTouched` marks
- * those lines and repriceLines never overwrites them. Everything else follows
- * the resolution the API answered, and the line remembers WHY its price is
- * what it is (`priceSource`) so the cart can show it under the input.
+ * When the picked customer changes, the page fetches one resolution per line
+ * and hands both to repriceLines: untouched lines take the resolved price,
+ * lines the cashier edited by hand keep theirs - the override is the point of
+ * priceTouched. priceSourceLabel turns the source into the small Thai caption
+ * under the price input.
  */
 
-import type { PriceResolutionView, PriceSource } from '@/lib/api-types-pricing';
+import type { PriceResolutionView } from '@/lib/api-types-pricing';
+import type { PriceSource } from '@stockhub/core';
 import type { CartLine } from './cart';
 
-/**
- * Apply resolutions to the cart, in place semantics without mutating:
- * an untouched line with a matching resolution gets the answered price;
- * touched lines and lines without a resolution stay exactly as they are.
- */
-export const repriceLines = (lines: CartLine[], resolutions: PriceResolutionView[]): CartLine[] => {
-  const byVariant = new Map(resolutions.map((resolution) => [resolution.variantId, resolution]));
-  return lines.map((line) => {
-    if (line.priceTouched) return line;
-    const resolution = byVariant.get(line.variantId);
-    if (!resolution) return line;
-    return {
-      ...line,
-      // Satang integer -> the baht text the input shows.
-      priceBaht: (resolution.price / 100).toFixed(2),
-      priceSource: resolution.priceSource,
-    };
-  });
-};
-
-/** Thai reason shown under the price input of each bill line. */
 export const priceSourceLabel = (source: PriceSource): string => {
   switch (source) {
     case 'tier':
@@ -40,4 +21,20 @@ export const priceSourceLabel = (source: PriceSource): string => {
     case 'selling_price':
       return 'ราคาขายมาตรฐาน (ยังไม่ตั้งราคาระดับนี้)';
   }
+};
+
+/** Reprice every untouched line from its resolution; the rest pass through. */
+export const repriceLines = (lines: CartLine[], resolutions: PriceResolutionView[]): CartLine[] => {
+  const byVariant = new Map(resolutions.map((resolution) => [resolution.variantId, resolution]));
+  return lines.map((line) => {
+    if (line.priceTouched) return line;
+    const resolution = byVariant.get(line.variantId);
+    if (!resolution) return line;
+    // The input works in baht; the resolution is satang.
+    return {
+      ...line,
+      priceBaht: (resolution.price / 100).toFixed(2),
+      priceSource: resolution.priceSource,
+    };
+  });
 };

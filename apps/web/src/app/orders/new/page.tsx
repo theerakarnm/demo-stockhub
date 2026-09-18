@@ -35,42 +35,23 @@ import { baht } from '@/lib/format';
 import { useMutation } from '@/lib/use-api';
 import { CheckCircle2, ShoppingCart } from 'lucide-react';
 import Link from 'next/link';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 export default function NewOrderPage() {
   const { hasPermission } = useRole();
   const [channelKind, setChannelKind] = useState<ManualChannelKind>('pos');
-  const [customer, setCustomer] = useState<CustomerView | null>(null);
   const [customerName, setCustomerName] = useState('');
   const [note, setNote] = useState('');
   const [lines, setLines] = useState<CartLine[]>([]);
+  const [customer, setCustomer] = useState<CustomerView | null>(null);
 
   const createOrder = useMutation((input: CreateOrderInput) => api.createOrder(input));
 
-  /**
-   * Ask the API what every line on the bill should cost now, then apply the
-   * answers to the untouched lines. Cosmetic only: a failed resolve keeps the
-   * prices already on screen, and the cashier can always type over them.
-   */
-  const applyResolutions = useCallback(
-    (billLines: CartLine[], billCustomer: CustomerView | null) => {
-      if (billLines.length === 0) return;
-      const variantIds = billLines.map((line) => line.variantId);
-      void pricingApi
-        .resolve(variantIds, billCustomer ? { customerId: billCustomer.id } : {})
-        .then((resolutions) => setLines((current) => repriceLines(current, resolutions)))
-        .catch(() => {
-          // Keep the typed prices; the bill is still submittable.
-        });
-    },
-    [],
-  );
-
-  const addLine = useCallback(
-    (row: StockRow) => {
-      if (lines.some((line) => line.variantId === row.variantId)) return;
-      const next: CartLine[] = [
-        ...lines,
+  const addLine = useCallback((row: StockRow) => {
+    setLines((current) => {
+      if (current.some((line) => line.variantId === row.variantId)) return current;
+      return [
+        ...current,
         {
           variantId: row.variantId,
           sku: row.sku,
@@ -84,19 +65,8 @@ export default function NewOrderPage() {
           priceTouched: false,
         },
       ];
-      setLines(next);
-      applyResolutions(next, customer);
-    },
-    [lines, customer, applyResolutions],
-  );
-
-  const pickCustomer = useCallback(
-    (picked: CustomerView | null) => {
-      setCustomer(picked);
-      applyResolutions(lines, picked);
-    },
-    [lines, applyResolutions],
-  );
+    });
+  }, []);
 
   const patchLine = useCallback((variantId: string, patch: CartLinePatch) => {
     setLines((current) =>
@@ -110,11 +80,32 @@ export default function NewOrderPage() {
 
   const resetBill = useCallback(() => {
     setLines([]);
-    setCustomer(null);
     setCustomerName('');
     setNote('');
+    setCustomer(null);
     createOrder.reset();
   }, [createOrder]);
+
+  // Reprice every untouched line whenever the picked customer changes or a
+  // line is added. Touched lines are left alone by repriceLines.
+  const variantIds = lines.map((line) => line.variantId).join(',');
+  const customerId = customer?.id;
+  useEffect(() => {
+    if (variantIds === '') return;
+    let cancelled = false;
+    pricingApi
+      .resolve(variantIds.split(','), customerId ? { customerId } : {})
+      .then((resolutions) => {
+        if (cancelled) return;
+        setLines((current) => repriceLines(current, resolutions));
+      })
+      .catch(() => {
+        // A failed resolve keeps the current prices; the cashier can still type.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [customerId, variantIds]);
 
   const total = useMemo(() => cartTotalOf(lines), [lines]);
   const unitCount = useMemo(() => lines.reduce((sum, line) => sum + line.quantity, 0), [lines]);
@@ -123,7 +114,6 @@ export default function NewOrderPage() {
   const submit = useCallback(() => {
     void createOrder.run({
       channelKind,
-      // The picked customer wins; the free-text field is still the fallback.
       customerName: customerName.trim() || customer?.name || undefined,
       note: note.trim() || undefined,
       lines: lines.map((line) => ({
@@ -202,12 +192,19 @@ export default function NewOrderPage() {
             <CardHeader title="ข้อมูลบิล" description="เลือกประเภทการขายและระบุลูกค้า (ถ้ามี)" />
             <CardBody className="space-y-4">
               <ChannelKindToggle value={channelKind} onChange={setChannelKind} />
-              <CustomerPicker customer={customer} onPick={pickCustomer} />
+              <div>
+                <p className="mb-1 block text-xs font-medium text-slate-600">ลูกค้าประจำ</p>
+                <CustomerPicker
+                  customer={customer}
+                  onPick={setCustomer}
+                  onClear={() => setCustomer(null)}
+                />
+              </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <Input
                   label="ชื่อลูกค้า (ไม่บังคับ)"
                   name="customerName"
-                  placeholder="เช่น ร้านสวนเกษตรดี"
+                  placeholder="ใส่เองได้ ถ้าไม่ได้เลือกลูกค้าประจำ"
                   value={customerName}
                   onChange={(event) => setCustomerName(event.target.value)}
                 />

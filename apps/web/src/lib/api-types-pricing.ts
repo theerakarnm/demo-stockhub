@@ -1,14 +1,14 @@
 /**
- * Wire types for customers, price tiers and price resolution.
+ * Wire types for the customer and pricing endpoints.
  *
- * Mirrors apps/api/src/types/contract-pricing.ts one to one; money stays an
- * integer in satang on the wire and is formatted only at render time.
+ * Mirrored from apps/api/src/types/contract-pricing.ts (Tasks 31-32). Fields
+ * the API strips for roles without price_tier:read stay optional here, so a
+ * redacted payload typechecks unchanged.
  */
 
-/** What price won for a variant (see resolvePrice in @stockhub/core). */
-export type PriceSource = 'tier' | 'default_tier' | 'selling_price';
+import type { PriceSource } from '@stockhub/core';
+import type { MoneyAmount } from './api-types';
 
-/** One row of the tier list shown in settings and in the customer form. */
 export interface PriceTierView {
   id: string;
   code: string;
@@ -30,40 +30,37 @@ export interface CustomerView {
   createdAt: string;
 }
 
-/** Body of POST /customers and PATCH /customers/:id. `priceTierId: null` clears the tier. */
 export interface CustomerInput {
   name: string;
   phone?: string;
   email?: string;
   note?: string;
+  /** Explicit null clears the customer tier; undefined leaves it alone. */
   priceTierId?: string | null;
   isActive?: boolean;
 }
 
-/** One cell written by PUT /price-tiers/:id/prices; `price: null` deletes it. */
 export interface TierPriceCell {
   variantId: string;
-  price: number | null;
+  price: MoneyAmount | null;
 }
 
-/** One row of the price matrix screen: a variant and its tier price cells. */
 export interface PriceMatrixRow {
   variantId: string;
   sku: string;
   name: string;
-  sellingPrice: number;
-  tierPrices: Record<string, number>;
-}
-
-/** What price a bill line should use and WHY (the bill shows the reason). */
-export interface PriceResolutionView {
-  variantId: string;
-  price: number;
-  priceSource: PriceSource;
-  priceTierId?: string;
+  sellingPrice: MoneyAmount;
+  tierPrices: Record<string, MoneyAmount>;
 }
 
 export interface PutTierPricesResult {
   upserted: number;
   deleted: number;
+}
+
+export interface PriceResolutionView {
+  variantId: string;
+  price: MoneyAmount;
+  priceSource: PriceSource;
+  priceTierId?: string;
 }
