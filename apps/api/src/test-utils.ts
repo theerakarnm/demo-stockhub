@@ -18,6 +18,81 @@ import { redactMiddleware } from './middleware/redact';
 import { requestIdMiddleware } from './middleware/request-id';
 import type { AppEnv } from './types/app';
 
+/**
+ * In-memory R2-shaped bucket for import tests.
+ *
+ * It satisfies the subset of the R2Bucket interface createR2Storage() uses
+ * (put / get / head / delete), so the production storage adapter runs unmodified
+ * and the tests exercise the real put-before-parse ordering and key layout.
+ * Objects live for the lifetime of the bucket instance; assign a fresh one to
+ * `testEnv.IMPORTS_BUCKET` in a test file that needs a clean bucket.
+ */
+export class MemoryR2Bucket {
+  private readonly objects = new Map<
+    string,
+    { body: Uint8Array; contentType: string; uploadedAt: Date }
+  >();
+
+  async put(
+    key: string,
+    value: Uint8Array,
+    options?: { httpMetadata?: { contentType?: string } },
+  ): Promise<{
+    key: string;
+    size: number;
+    httpMetadata: { contentType: string };
+    uploaded: Date;
+  }> {
+    const body = value.slice();
+    const contentType = options?.httpMetadata?.contentType ?? 'application/octet-stream';
+    this.objects.set(key, { body, contentType, uploadedAt: new Date() });
+    return { key, size: body.byteLength, httpMetadata: { contentType }, uploaded: new Date() };
+  }
+
+  async get(key: string): Promise<{
+    key: string;
+    size: number;
+    httpMetadata: { contentType: string };
+    uploaded: Date;
+    arrayBuffer: () => Promise<ArrayBuffer>;
+  } | null> {
+    const stored = this.objects.get(key);
+    if (!stored) return null;
+    return {
+      key,
+      size: stored.body.byteLength,
+      httpMetadata: { contentType: stored.contentType },
+      uploaded: stored.uploadedAt,
+      arrayBuffer: async () => stored.body.slice().buffer,
+    };
+  }
+
+  async head(key: string): Promise<{
+    key: string;
+    size: number;
+    httpMetadata: { contentType: string };
+    uploaded: Date;
+  } | null> {
+    const stored = this.objects.get(key);
+    if (!stored) return null;
+    return {
+      key,
+      size: stored.body.byteLength,
+      httpMetadata: { contentType: stored.contentType },
+      uploaded: stored.uploadedAt,
+    };
+  }
+
+  async delete(key: string): Promise<void> {
+    this.objects.delete(key);
+  }
+
+  /** Test assertion helper: the exact bytes stored under a key. */
+  bytesOf(key: string): Uint8Array | undefined {
+    return this.objects.get(key)?.body;
+  }
+}
+
 /** Fake bindings. R2 is never touched by a test route, hence the cast. */
 export const testEnv: Env = {
   ENVIRONMENT: 'test',

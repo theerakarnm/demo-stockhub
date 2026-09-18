@@ -39,7 +39,6 @@ import { StockHubError, asImportBatchId, asVariantId } from '@stockhub/core';
 import type { RawImportFile } from '@stockhub/core';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { MOCK_IMPORT_BATCHES, MOCK_PREVIEW_ORDERS, MOCK_UNMATCHED } from '../lib/mock-data';
 import { ok } from '../lib/response';
 import { validate } from '../lib/validate';
 import { requirePermission } from '../middleware/require-permission';
@@ -51,9 +50,14 @@ import {
   matchSkuBody,
 } from '../schemas/imports';
 import { serviceContext } from '../services/context';
-import { applyImport, saveManualMatch, uploadImport } from '../services/import-service';
+import {
+  applyImport,
+  getImportPreview,
+  listImports,
+  saveManualMatch,
+  uploadImport,
+} from '../services/import-service';
 import type { AppEnv } from '../types/app';
-import type { ImportBatch, ImportPreviewResponse } from '../types/contract';
 
 /**
  * Read the multipart body into the port type.
@@ -90,50 +94,26 @@ const readUpload = async (c: Context<AppEnv>) => {
 };
 
 export const importsRouter = new Hono<AppEnv>()
-  .get('/', requirePermission('import:run'), (c) => {
-    // MOCK: replace with
-    //   SELECT * FROM import_batches WHERE org_id = $orgId ORDER BY uploaded_at DESC LIMIT 50
-    const batches: ImportBatch[] = MOCK_IMPORT_BATCHES;
+  .get('/', requirePermission('import:run'), async (c) => {
+    // SELECT * FROM import_batches WHERE org_id = $orgId ORDER BY created_at DESC LIMIT 50
+    const batches = await listImports(serviceContext(c));
     return ok(c, batches);
   })
 
   .post('/', requirePermission('import:run'), async (c) => {
     const { raw, form } = await readUpload(c);
-    // Step 1 above. The service throws NotImplementedError today -> HTTP 501,
-    // which the upload screen shows as "ยังไม่รองรับ" instead of pretending.
+    // Step 1: the service stores the file, parses, matches and parks the batch
+    // at preview_ready (or failed, with the original file kept as evidence).
     const batch = await uploadImport(serviceContext(c), { ...form, file: raw });
     return ok(c, batch, 201);
   })
 
   .get('/:id', requirePermission('import:run'), validate('param', importParam), (c) => {
     const { id } = c.req.valid('param');
-
-    // MOCK: replace with `await getImportPreview(serviceContext(c), asImportBatchId(id))`.
-    const batch = MOCK_IMPORT_BATCHES.find((candidate) => candidate.id === id);
-    if (!batch) {
-      throw new StockHubError('not_found', `Import batch ${id} not found`, { id });
-    }
-    const preview: ImportPreviewResponse = {
-      batch,
-      orders: MOCK_PREVIEW_ORDERS,
-      issues: [
-        {
-          severity: 'warning',
-          row: 41,
-          column: 'จำนวน',
-          code: 'quantity_not_numeric',
-          message: 'อ่านจำนวนไม่ได้ ข้ามแถวนี้',
-        },
-        {
-          severity: 'warning',
-          row: 58,
-          code: 'order_cancelled',
-          message: 'ออเดอร์ถูกยกเลิก จะคืนสต๊อกให้อัตโนมัติ',
-        },
-      ],
-      unmatched: batch.unmatchedCount > 0 ? MOCK_UNMATCHED : [],
-    };
-    return ok(c, preview);
+    // Step 2: rebuilt from the stored preview payload, never by re-parsing.
+    return getImportPreview(serviceContext(c), asImportBatchId(id)).then((preview) =>
+      ok(c, preview),
+    );
   })
 
   .post(

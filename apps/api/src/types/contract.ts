@@ -208,40 +208,59 @@ export interface Order {
 
 export interface ImportBatch {
   id: string;
+  orgId: string;
   channelId: string | null;
+  /** Display name of the channel, resolved server side when the batch has one. */
+  channelName?: string;
   channelKind: ChannelKind | null;
   fileName: string;
   fileSize: number;
-  /** R2 object key of the original upload. */
+  /** R2 object key of the original upload - the audit evidence. */
   objectKey: string;
   status: ImportStatus;
+  /** What the detector named from the file headers, null when nothing matched. */
+  detectedKind: ChannelKind | null;
   /** Why the detector picked this adapter, shown on the preview screen. */
   detectionReason?: string;
   rowsRead: number;
   ordersParsed: number;
+  /** Total parsed lines across every order of the batch. */
+  linesParsed: number;
   unmatchedCount: number;
   issueCount: number;
   uploadedAt: string;
   appliedAt: string | null;
-  uploadedBy: string;
+  uploadedBy?: string;
+  /** Display name resolved server side from uploadedBy. */
+  uploadedByName?: string;
+  /** Set when status === 'failed'. */
+  errorMessage?: string;
 }
 
 export interface PreviewOrderLine {
   platformSku: string;
   platformProductName: string;
+  /** Shopee "ชื่อตัวเลือก" / Lazada variation text, when the export has one. */
+  variationName?: string;
   quantity: number;
   unitPrice: MoneyOnWire;
   discount: MoneyOnWire;
-  /** null when the line is still unmatched. */
-  variantId: string | null;
-  matchedSku: string | null;
+  /** quantity * unitPrice - discount, computed by the API. */
+  lineTotal: MoneyOnWire;
   matchSource: MatchSource;
+  /** Absent while matchSource is 'unmatched'. */
+  variantId?: string;
+  variantSku?: string;
+  variantName?: string;
 }
 
 export interface PreviewOrder {
   externalOrderId: string;
+  /** Kind of the channel the batch imports into, null before detection. */
+  channelKind: ChannelKind | null;
   status: OrderStatus;
   orderedAt: string;
+  shippedAt?: string;
   buyerName?: string;
   grandTotal: MoneyOnWire;
   lines: PreviewOrderLine[];
