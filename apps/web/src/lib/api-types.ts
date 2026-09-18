@@ -220,6 +220,8 @@ export interface Movement {
   reason: MovementReason;
   /** Positive = inbound, negative = outbound. Use isInbound() for colouring. */
   qtyDelta: number;
+  /** Running balance right after this movement; computed server side. */
+  qtyAfter?: number;
   occurredAt: IsoDateTime;
   warehouseId: string;
   channelId?: string;

@@ -24,11 +24,13 @@ import {
   ErrorState,
   PageHeader,
   TableSkeleton,
+  buttonClass,
 } from '@/components/ui';
 import { api } from '@/lib/api-client';
 import { qty } from '@/lib/format';
 import { useApi } from '@/lib/use-api';
 import { PackageSearch } from 'lucide-react';
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 /**
@@ -38,7 +40,7 @@ import { useEffect, useMemo, useState } from 'react';
 const PAGE_SIZE = 10;
 
 export default function InventoryPage() {
-  const { role } = useRole();
+  const { role, hasPermission } = useRole();
   const [search, setSearch] = useState('');
   const [channelId, setChannelId] = useState('');
   const [lowStockOnly, setLowStockOnly] = useState(false);
@@ -99,6 +101,13 @@ export default function InventoryPage() {
       <PageHeader
         title="สต็อกสินค้า"
         description="คลังกลางหนึ่งเดียวที่ทุกช่องทางขายใช้ร่วมกัน ยอดที่เห็นคือยอดเดียวกับที่ Shopee, Lazada, TikTok Shop และหน้าร้านตัดออก"
+        actions={
+          hasPermission('stock:adjust') ? (
+            <Link href="/inventory/receive" className={buttonClass('primary', 'sm')}>
+              รับสินค้าเข้า
+            </Link>
+          ) : null
+        }
       />
 
       <Card>

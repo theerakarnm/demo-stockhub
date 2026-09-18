@@ -1272,6 +1272,8 @@ export const mockApi = {
       name: variant.name,
       reason: 'purchase_in',
       qtyDelta: input.qty,
+      // Demo stock never persists, so the balance is simply onHand + this receipt.
+      qtyAfter: variant.onHand + input.qty,
       occurredAt: input.receivedAt ?? new Date().toISOString(),
       warehouseId: 'wh_main',
       note: input.note ?? (input.reference ? `รับเข้า ${input.reference}` : undefined),
