@@ -12,28 +12,8 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import type { Env } from './env';
 import { app } from './index';
-
-/** Fake bindings. R2 is never touched by a mock route, hence the cast. */
-const testEnv = {
-  ENVIRONMENT: 'test',
-  API_VERSION: '0.0.0-test',
-  CORS_ORIGINS: 'http://localhost:3000',
-  DEMO_MODE: 'true',
-  IMPORTS_BUCKET: undefined as unknown as R2Bucket,
-} satisfies Env;
-
-const asRole = (role: string) => ({
-  headers: { 'x-demo-role': role, 'x-demo-org': 'org_demo' },
-});
-
-const get = (path: string, role: string) => app.request(path, asRole(role), testEnv);
-
-const json = async <T>(path: string, role: string): Promise<T> => {
-  const res = await get(path, role);
-  return (await res.json()) as T;
-};
+import { asRole, jsonAs, requestAs, testEnv } from './test-utils';
 
 describe('health', () => {
   test('answers without auth or a database', async () => {
@@ -53,15 +33,18 @@ describe('health', () => {
 
 describe('me', () => {
   test('owner holds cost:read, sales does not', async () => {
-    const owner = await json<{ role: string; permissions: string[] }>('/api/v1/me', 'owner');
-    const sales = await json<{ role: string; permissions: string[] }>('/api/v1/me', 'sales');
+    const owner = await jsonAs<{ role: string; permissions: string[] }>(app, '/api/v1/me', 'owner');
+    const sales = await jsonAs<{ role: string; permissions: string[] }>(app, '/api/v1/me', 'sales');
     expect(owner.role).toBe('owner');
     expect(owner.permissions).toContain('cost:read');
     expect(sales.permissions).not.toContain('cost:read');
   });
 
   test('rejects an unknown role with the error envelope', async () => {
-    const res = await get('/api/v1/me', 'ceo');
+    // requestAs is typed with a valid Role, so the bogus role goes in the raw header.
+    const res = await requestAs(app, '/api/v1/me', 'owner', {
+      headers: { 'x-demo-role': 'ceo' },
+    });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe('validation_error');
@@ -71,8 +54,8 @@ describe('me', () => {
 describe('cost hiding (the demo headline)', () => {
   test('inventory rows keep cost fields for owner and lose them for sales', async () => {
     type Row = { sku: string; onHand: number; avgUnitCost?: number; stockValue?: number };
-    const owner = await json<{ items: Row[] }>('/api/v1/inventory', 'owner');
-    const sales = await json<{ items: Row[] }>('/api/v1/inventory', 'sales');
+    const owner = await jsonAs<{ items: Row[] }>(app, '/api/v1/inventory', 'owner');
+    const sales = await jsonAs<{ items: Row[] }>(app, '/api/v1/inventory', 'sales');
 
     expect(owner.items.length).toBeGreaterThan(0);
     expect(sales.items.length).toBe(owner.items.length);
@@ -90,8 +73,8 @@ describe('cost hiding (the demo headline)', () => {
 
   test('stock_staff sees quantities but no lots on the variant detail', async () => {
     type Detail = { variant: { sku: string }; onHand: number; lots?: unknown[] };
-    const owner = await json<Detail>('/api/v1/inventory/var_hoe_std', 'owner');
-    const staff = await json<Detail>('/api/v1/inventory/var_hoe_std', 'stock_staff');
+    const owner = await jsonAs<Detail>(app, '/api/v1/inventory/var_hoe_std', 'owner');
+    const staff = await jsonAs<Detail>(app, '/api/v1/inventory/var_hoe_std', 'stock_staff');
 
     expect(owner.lots?.length).toBeGreaterThan(0);
     expect(staff.onHand).toBe(owner.onHand);
@@ -100,8 +83,8 @@ describe('cost hiding (the demo headline)', () => {
 
   test('dashboard hides stockValue from sales', async () => {
     type Summary = { totalSkus: number; stockValue?: number; byChannel: unknown[] };
-    const owner = await json<Summary>('/api/v1/dashboard/summary', 'owner');
-    const sales = await json<Summary>('/api/v1/dashboard/summary', 'sales');
+    const owner = await jsonAs<Summary>(app, '/api/v1/dashboard/summary', 'owner');
+    const sales = await jsonAs<Summary>(app, '/api/v1/dashboard/summary', 'sales');
 
     expect(owner.stockValue).toBeGreaterThan(0);
     expect(sales.totalSkus).toBe(owner.totalSkus);
@@ -110,8 +93,8 @@ describe('cost hiding (the demo headline)', () => {
 
   test('movement rows hide unitCost and totalCost from sales', async () => {
     type Mv = { id: string; qtyDelta: number; unitCost?: number; totalCost?: number };
-    const owner = await json<{ items: Mv[] }>('/api/v1/movements', 'owner');
-    const sales = await json<{ items: Mv[] }>('/api/v1/movements', 'sales');
+    const owner = await jsonAs<{ items: Mv[] }>(app, '/api/v1/movements', 'owner');
+    const sales = await jsonAs<{ items: Mv[] }>(app, '/api/v1/movements', 'sales');
 
     expect(owner.items[0]?.totalCost).toBeGreaterThan(0);
     expect(sales.items[0]?.qtyDelta).toBe(owner.items[0]?.qtyDelta as number);
@@ -121,8 +104,8 @@ describe('cost hiding (the demo headline)', () => {
 
   test('orders keep cogs for manager and lose it for sales', async () => {
     type O = { id: string; grandTotal: number; cogs?: number; lines: { totalCost?: number }[] };
-    const manager = await json<{ items: O[] }>('/api/v1/orders', 'manager');
-    const sales = await json<{ items: O[] }>('/api/v1/orders', 'sales');
+    const manager = await jsonAs<{ items: O[] }>(app, '/api/v1/orders', 'manager');
+    const sales = await jsonAs<{ items: O[] }>(app, '/api/v1/orders', 'sales');
 
     expect(manager.items[0]?.cogs).toBeGreaterThan(0);
     expect(sales.items[0]?.grandTotal).toBe(manager.items[0]?.grandTotal as number);
@@ -134,32 +117,41 @@ describe('cost hiding (the demo headline)', () => {
 
 describe('permissions', () => {
   test('the COGS report is blocked for sales and allowed for owner', async () => {
-    const denied = await get('/api/v1/reports/cogs?from=2025-01-01&to=2025-01-31', 'sales');
+    const denied = await requestAs(
+      app,
+      '/api/v1/reports/cogs?from=2025-01-01&to=2025-01-31',
+      'sales',
+    );
     expect(denied.status).toBe(403);
     const body = (await denied.json()) as { error: { code: string; details?: unknown } };
     expect(body.error.code).toBe('forbidden');
 
-    const allowed = await get('/api/v1/reports/cogs?from=2025-01-01&to=2025-01-31', 'owner');
+    const allowed = await requestAs(
+      app,
+      '/api/v1/reports/cogs?from=2025-01-01&to=2025-01-31',
+      'owner',
+    );
     expect(allowed.status).toBe(200);
     const report = (await allowed.json()) as { totals: { cogs?: number } };
     expect(report.totals.cogs).toBeGreaterThan(0);
   });
 
   test('an invalid date range fails validation', async () => {
-    const res = await get('/api/v1/reports/cogs?from=2025-02-01&to=2025-01-01', 'owner');
+    const res = await requestAs(app, '/api/v1/reports/cogs?from=2025-02-01&to=2025-01-01', 'owner');
     expect(res.status).toBe(400);
   });
 });
 
 describe('query filters on the mock data', () => {
   test('search narrows the inventory list', async () => {
-    const res = await json<{ items: { sku: string }[] }>('/api/v1/inventory?q=SPR', 'owner');
+    const res = await jsonAs<{ items: { sku: string }[] }>(app, '/api/v1/inventory?q=SPR', 'owner');
     expect(res.items).toHaveLength(1);
     expect(res.items[0]?.sku).toBe('SPR-5L-01');
   });
 
   test('lowStock=true only returns rows at or below their threshold', async () => {
-    const res = await json<{ items: { sku: string }[] }>(
+    const res = await jsonAs<{ items: { sku: string }[] }>(
+      app,
       '/api/v1/inventory?lowStock=true',
       'owner',
     );
@@ -168,7 +160,8 @@ describe('query filters on the mock data', () => {
   });
 
   test('movements can be filtered by reason', async () => {
-    const res = await json<{ items: { reason: string }[] }>(
+    const res = await jsonAs<{ items: { reason: string }[] }>(
+      app,
       '/api/v1/movements?reason=purchase_in',
       'owner',
     );
@@ -198,9 +191,12 @@ describe('unfinished paths fail honestly', () => {
   });
 
   test('an unknown path uses the error envelope', async () => {
-    const res = await get('/api/v1/nope', 'owner');
+    const res = await requestAs(app, '/api/v1/nope', 'owner');
     expect(res.status).toBe(404);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe('not_found');
+    // A stub router mounted with no routes yet must 404 too, not answer empty.
+    const stub = await requestAs(app, '/api/v1/customers/nope', 'owner');
+    expect(stub.status).toBe(404);
   });
 });

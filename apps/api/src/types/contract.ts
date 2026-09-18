@@ -257,3 +257,8 @@ export interface Page<T> {
 export interface ErrorResponse {
   error: { code: string; message: string; details?: Record<string, unknown> };
 }
+
+// Domain barrels: Tasks 24, 31 and 32 own these files, so the contract is
+// re-exported from here instead of merging every interface into this file.
+export * from './contract-catalog';
+export * from './contract-pricing';
