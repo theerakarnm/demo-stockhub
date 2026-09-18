@@ -275,12 +275,43 @@ export interface UnmatchedSku {
   suggestions: { variantId: string; sku: string; name: string; score: number }[];
 }
 
+/** Why an order the file describes will not move stock on apply. */
+export type PreviewSkipReason = 'cancelled' | 'already_imported';
+
+/** One order of the preview's skipped bucket, with the reason it is skipped. */
+export interface PreviewSkippedOrder {
+  order: PreviewOrder;
+  reason: PreviewSkipReason;
+}
+
+/**
+ * The three buckets the preview screen shows, straight from the brief:
+ * ตัดได้ (will deduct), ติดปัญหา SKU (needs a match decision), ถูกข้าม (skipped).
+ */
+export interface ImportPreviewGroups {
+  /** Every line matched, not cancelled, never imported before. */
+  willDeduct: PreviewOrder[];
+  /** At least one line still unmatched, grouped with match suggestions. */
+  needsMatch: PreviewOrder[];
+  /** Cancelled orders, and orders the org already imported through any file. */
+  skipped: PreviewSkippedOrder[];
+}
+
 /** Body of GET /api/v1/imports/:id - everything the preview screen needs. */
 export interface ImportPreviewResponse {
   batch: ImportBatch;
   orders: PreviewOrder[];
   issues: ParseIssueView[];
   unmatched: UnmatchedSku[];
+  groups: ImportPreviewGroups;
+}
+
+/** Body of POST /api/v1/imports/:id/match. */
+export interface MatchSkuResult {
+  /** Lines of THIS batch that flipped from unmatched to matched. */
+  linesUpdated: number;
+  /** Distinct platform SKUs still waiting for a decision after this save. */
+  unmatchedRemaining: number;
 }
 
 export interface ApplyImportResult {

@@ -61,6 +61,8 @@ import {
   catalogRepo,
   channelRepo,
   importRepo,
+  listingRepo,
+  orderRepo,
   schema,
 } from '@stockhub/db';
 import { inArray } from 'drizzle-orm';
@@ -68,9 +70,12 @@ import type { ApplyImportBody, CreateImportForm } from '../schemas/imports';
 import type {
   ApplyImportResult,
   ImportBatch,
+  ImportPreviewGroups,
   ImportPreviewResponse,
+  MatchSkuResult,
   PreviewOrder,
   PreviewOrderLine,
+  PreviewSkippedOrder,
 } from '../types/contract';
 import type { ServiceContext } from './context';
 
@@ -306,7 +311,10 @@ const buildPreviewPayload = async (
  */
 const groupUnmatched = (
   orders: readonly PreviewOrderPayload[],
-  suggestionsBySku: ReadonlyMap<string, MatchCandidate[]>,
+  suggestionsBySku: ReadonlyMap<
+    string,
+    readonly { variantId: string; sku: string; name: string; score?: number }[]
+  >,
 ): PreviewUnmatchedPayload[] => {
   const groups = new Map<string, PreviewUnmatchedPayload>();
   for (const order of orders) {
@@ -363,13 +371,62 @@ export const getImportPreview = async (
   const orders: PreviewOrder[] = (payload?.orders ?? []).map((order) =>
     toWireOrder(order, view, variantById),
   );
+  const groups = await groupPreviewOrders(db, orgId, batch, orders);
 
   return {
     batch: view,
     orders,
     issues: batch.issues,
     unmatched: payload?.unmatched ?? [],
+    groups,
   };
+};
+
+/**
+ * Sort the preview orders into ตัดได้ / ติดปัญหา SKU / ถูกข้าม.
+ *
+ * The skipped check reads the orders table live: whether a platform order is a
+ * duplicate is a property of the database right now, not of the upload moment
+ * (two files may have imported it since the batch was parsed).
+ */
+const groupPreviewOrders = async (
+  exec: DbExecutor,
+  orgId: OrgId,
+  batch: ImportBatchRow,
+  orders: readonly PreviewOrder[],
+): Promise<ImportPreviewGroups> => {
+  const externalIds = orders.map((order) => order.externalOrderId);
+  const existing =
+    batch.channelId === null
+      ? []
+      : await orderRepo.listOrdersByExternalIds(exec, {
+          orgId,
+          channelId: asChannelId(batch.channelId),
+          externalIds,
+        });
+  const existingByExternal = new Map(existing.map((order) => [order.externalOrderId, order]));
+
+  const willDeduct: PreviewOrder[] = [];
+  const needsMatch: PreviewOrder[] = [];
+  const skipped: PreviewSkippedOrder[] = [];
+  for (const order of orders) {
+    const hasUnmatched = order.lines.some((line) => line.matchSource === 'unmatched');
+    const resting = order.status === 'cancelled' || order.status === 'returned';
+    if (resting) {
+      skipped.push({ order, reason: 'cancelled' });
+      continue;
+    }
+    if (existingByExternal.has(order.externalOrderId)) {
+      skipped.push({ order, reason: 'already_imported' });
+      continue;
+    }
+    if (hasUnmatched) {
+      needsMatch.push(order);
+      continue;
+    }
+    willDeduct.push(order);
+  }
+  return { willDeduct, needsMatch, skipped };
 };
 
 /** One stored order onto the wire, with the current variant names. */
@@ -412,11 +469,81 @@ const toWireOrder = (
  * 'listing_map' without asking anyone.
  */
 export const saveManualMatch = async (
-  _ctx: ServiceContext,
-  _batchId: ImportBatchId,
-  _input: { platformSku: string; variantId: VariantId },
-): Promise<{ unmatchedRemaining: number }> => {
-  throw new NotImplementedError('saveManualMatch');
+  ctx: ServiceContext,
+  batchId: ImportBatchId,
+  input: { platformSku: string; variantId: VariantId },
+): Promise<MatchSkuResult> => {
+  const db = ctx.db();
+  const orgId = ctx.auth.orgId;
+  const batch = await importRepo.getBatch(db, { orgId, batchId });
+  if (!batch) {
+    throw new StockHubError('not_found', `Import batch ${batchId} not found`, { batchId });
+  }
+  // The learned listing is keyed by channel, so a batch without one cannot
+  // learn: this only happens for a file whose detection never succeeded.
+  if (batch.channelId === null) {
+    throw new StockHubError('validation_error', 'แฟ้มนี้ยังไม่ผูกกับช่องทางขาย จึงจับคู่ไม่ได้', {
+      batchId,
+    });
+  }
+  const variant = await catalogRepo.getVariantById(db, { orgId, variantId: input.variantId });
+  if (!variant) {
+    throw new StockHubError('not_found', `Variant ${input.variantId} not found`, {
+      variantId: input.variantId,
+    });
+  }
+
+  const channelId = asChannelId(batch.channelId);
+  let linesUpdated = 0;
+  await db.transaction(async (tx) => {
+    // One transaction on purpose: if the preview rewrite fails, the learned
+    // listing must not survive either, or the next import would match lines
+    // nobody saw on screen.
+    await listingRepo.upsertListing(tx, {
+      orgId,
+      channelId,
+      platformSku: input.platformSku,
+      variantId: input.variantId,
+      matchSource: 'manual',
+    });
+    // Previously imported orders keep their lines in order_lines; back-fill
+    // those too, so their match state agrees with what the screen now shows.
+    linesUpdated = await listingRepo.rematchOpenLines(tx, {
+      orgId,
+      channelId,
+      platformSku: input.platformSku,
+      variantId: input.variantId,
+    });
+
+    const payload = batch.preview;
+    if (payload) {
+      for (const order of payload.orders) {
+        for (const line of order.lines) {
+          if (line.platformSku !== input.platformSku) continue;
+          if (line.matchSource === 'unmatched') {
+            line.variantId = input.variantId;
+            line.matchedSku = variant.sku;
+            line.matchSource = 'manual';
+            linesUpdated += 1;
+          }
+        }
+      }
+      // Recompute the groups from the updated lines: the matched SKU's group
+      // disappears, every other group keeps its suggestions and counters.
+      const suggestionsBySku = new Map(
+        payload.unmatched.map((group) => [group.platformSku, group.suggestions]),
+      );
+      payload.unmatched = groupUnmatched(payload.orders, suggestionsBySku);
+      await importRepo.updateBatch(tx, batchId, { preview: payload });
+    }
+    return linesUpdated;
+  });
+
+  const saved = await importRepo.getBatch(db, { orgId, batchId });
+  return {
+    linesUpdated,
+    unmatchedRemaining: saved?.preview?.unmatched.length ?? 0,
+  };
 };
 
 /**
