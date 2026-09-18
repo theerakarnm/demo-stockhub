@@ -31,9 +31,11 @@ export const TIKTOK_STATUS_MAP: Readonly<Record<string, OrderStatus>> = {
   เสร็จสิ้น: 'delivered',
   canceled: 'cancelled',
   cancelled: 'cancelled',
+  'cancelled by buyer': 'cancelled',
   ยกเลิก: 'cancelled',
   // --- return/refund: triggers return_in ---
   'return/refund': 'returned',
+  'return requested': 'returned',
   returned: 'returned',
   refunded: 'returned',
   คืนสินค้า: 'returned',
