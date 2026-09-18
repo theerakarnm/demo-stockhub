@@ -136,7 +136,7 @@ Owner: the orchestrator, on worktree 1.
 - [x] P2 Contract audit and leak scan: run the existing audits, extend `LEAK_SCAN_DB_PATHS` and the reverse audit for any new cost-bearing response fields (import cogs, dashboard stockValue, reports).
 - [x] P3 Full verification with the shared database: typecheck, lint, `bun test` with `0 skip`.
 - [x] P4 End-to-end journey per the section below.
-- [ ] P5 Tick this plan, update `apps/api/README.md` contract table, fast-forward `main`.
+- [x] P5 Tick this plan, update `apps/api/README.md` contract table, fast-forward `main`.
 
 ## End-to-end verification (orchestrator, on the merged branch)
 
