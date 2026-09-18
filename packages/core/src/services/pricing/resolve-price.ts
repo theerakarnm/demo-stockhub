@@ -9,7 +9,7 @@
  */
 
 import type { PriceTierId, VariantId } from '../../domain/ids';
-import { type Satang } from '../../domain/money';
+import type { Satang } from '../../domain/money';
 
 export const PRICE_SOURCES = ['tier', 'default_tier', 'selling_price'] as const;
 export type PriceSource = (typeof PRICE_SOURCES)[number];
@@ -23,7 +23,8 @@ export interface PriceResolution {
 }
 
 /** Composite key of one tier-price cell; repositories use the same format. */
-export const tierPriceKey = (tierId: PriceTierId, variantId: VariantId): string => `${tierId}::${variantId}`;
+export const tierPriceKey = (tierId: PriceTierId, variantId: VariantId): string =>
+  `${tierId}::${variantId}`;
 
 export interface ResolvePriceInput {
   variantId: VariantId;
@@ -46,7 +47,8 @@ export const resolvePrice = (input: ResolvePriceInput): PriceResolution => {
   // price, but never twice: the same tier is not consulted again.
   if (defaultTierId !== undefined && defaultTierId !== tierId) {
     const hit = tierPrices.get(tierPriceKey(defaultTierId, variantId));
-    if (hit !== undefined) return { variantId, price: hit, source: 'default_tier', tierId: defaultTierId };
+    if (hit !== undefined)
+      return { variantId, price: hit, source: 'default_tier', tierId: defaultTierId };
   }
   return { variantId, price: sellingPrice, source: 'selling_price' };
 };

@@ -6,13 +6,16 @@ import { resolvePrice, tierPriceKey } from './resolve-price';
 const variant = asVariantId('V-HOE');
 const tier = asPriceTierId('tier-wholesale');
 const defaultTier = asPriceTierId('tier-retail');
-const tierPrices = new Map<string, Satang>([
-  [tierPriceKey(tier, variant), fromBaht(167)],
-]);
+const tierPrices = new Map<string, Satang>([[tierPriceKey(tier, variant), fromBaht(167)]]);
 
 describe('resolvePrice', () => {
   test('a tier hit wins', () => {
-    const r = resolvePrice({ variantId: variant, sellingPrice: fromBaht(185), tierId: tier, tierPrices });
+    const r = resolvePrice({
+      variantId: variant,
+      sellingPrice: fromBaht(185),
+      tierId: tier,
+      tierPrices,
+    });
     expect(r).toEqual({ variantId: variant, price: fromBaht(167), source: 'tier', tierId: tier });
   });
 
@@ -26,7 +29,12 @@ describe('resolvePrice', () => {
       defaultTierId: defaultTier,
       tierPrices: prices,
     });
-    expect(r).toEqual({ variantId: other, price: fromBaht(35), source: 'default_tier', tierId: defaultTier });
+    expect(r).toEqual({
+      variantId: other,
+      price: fromBaht(35),
+      source: 'default_tier',
+      tierId: defaultTier,
+    });
   });
 
   test('both miss and the standard selling price is used', () => {
@@ -54,7 +62,12 @@ describe('resolvePrice', () => {
 
   test('the price is the exact satang integer from the map', () => {
     const prices = new Map<string, Satang>([[tierPriceKey(tier, variant), 12_345 as Satang]]);
-    const r = resolvePrice({ variantId: variant, sellingPrice: fromBaht(185), tierId: tier, tierPrices: prices });
+    const r = resolvePrice({
+      variantId: variant,
+      sellingPrice: fromBaht(185),
+      tierId: tier,
+      tierPrices: prices,
+    });
     expect(r.price).toBe(12_345 as Satang);
   });
 });
