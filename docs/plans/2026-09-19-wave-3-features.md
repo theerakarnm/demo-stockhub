@@ -4,7 +4,7 @@
 - Status: approved for execution
 - Orchestrator: Prime session (this plan is committed; only the orchestrator edits it)
 - Builds on: `2026-09-17-wave-1-core.md` (done) and `2026-09-18-wave-2-core.md` (done, merged)
-- Integration branch: `wave-1-core` (currently equal to `main` at 021d4b2)
+- Integration branch: `wave-3-integration`, created from `main` at 615a657 right after the user merged PR #1 (wave-1-core into main) on GitHub
 - The user calls this batch their Wave 2. In this repo the previous batches were wave 1 and wave 2 core, so this plan is wave 3.
 
 ## Source brief (verbatim from the user)
@@ -30,7 +30,7 @@ All dependencies (A, B, C, D) are done and merged, so every track below is unblo
 - D4 Variance definition for J: any movement whose reason is not `purchase_in` or `sale_out` explains a balance change.
   - The card groups `adjust_in`, `adjust_out`, `cancel_restore`, `return_in` and any shortfall reason found in `MOVEMENT_REASONS` (`packages/core/src/domain/enums.ts`) by variant and day.
   - Every number is computed from `stock_movements`, `stock_lots` and `movement_lot_consumptions`, the same tables the FIFO engine writes.
-- D5 Track infrastructure: branches `wave3-track-f`, `wave3-track-h`, `wave3-track-j` created from `wave-1-core`.
+- D5 Track infrastructure: branches `wave3-track-f`, `wave3-track-h`, `wave3-track-j` created from `wave-3-integration`.
   - One treehouse worktree per track, leased as `plan:wave3:track-f` and so on.
   - One database per track: `stockhub_f`, `stockhub_h`, `stockhub_j`, migrated and seeded.
   - Merge order at the end: F, then H, then J, then track P (integration) runs on the merged result.
