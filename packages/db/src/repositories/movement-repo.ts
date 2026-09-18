@@ -224,7 +224,10 @@ export const listHistory = async (exec: DbExecutor, query: HistoryQuery): Promis
         query.from ? gte(balances.occurredAt, query.from) : undefined,
         query.to ? lte(balances.occurredAt, query.to) : undefined,
         query.before
-          ? sql`(${balances.occurredAt}, ${balances.id}) < (${query.before.at}, ${query.before.id})`
+          ? // The raw template cannot bind a JS Date (postgres.js rejects it in
+            // a row-value comparison), so the cursor point crosses as an ISO
+            // string, which Postgres infers as timestamptz here.
+            sql`(${balances.occurredAt}, ${balances.id}) < (${query.before.at.toISOString()}, ${query.before.id})`
           : undefined,
       ),
     )

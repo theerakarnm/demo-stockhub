@@ -7,8 +7,10 @@
  *   3. THE HEADLINE FEATURE: the same route returns cost fields to `owner` and
  *      returns the same payload WITHOUT them to `sales`
  *
- * They run against the MOCK data in src/lib/mock-data.ts on purpose: they must
- * keep passing while packages/db is still being built.
+ * The inventory / variant / movement assertions moved to routes/inventory.test.ts,
+ * which runs against the seeded database and skips without DATABASE_URL. The
+ * tests here still run on the MOCK data in src/lib/mock-data.ts on purpose:
+ * dashboard and orders keep rendering while their real queries are unbuilt.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -52,35 +54,6 @@ describe('me', () => {
 });
 
 describe('cost hiding (the demo headline)', () => {
-  test('inventory rows keep cost fields for owner and lose them for sales', async () => {
-    type Row = { sku: string; onHand: number; avgUnitCost?: number; stockValue?: number };
-    const owner = await jsonAs<{ items: Row[] }>(app, '/api/v1/inventory', 'owner');
-    const sales = await jsonAs<{ items: Row[] }>(app, '/api/v1/inventory', 'sales');
-
-    expect(owner.items.length).toBeGreaterThan(0);
-    expect(sales.items.length).toBe(owner.items.length);
-
-    const ownerRow = owner.items[0];
-    const salesRow = sales.items[0];
-    expect(ownerRow?.avgUnitCost).toBeGreaterThan(0);
-    expect(ownerRow?.stockValue).toBeGreaterThan(0);
-
-    // Same quantities, no cost keys at all - not null, ABSENT from the JSON.
-    expect(salesRow?.onHand).toBe(ownerRow?.onHand as number);
-    expect(salesRow && 'avgUnitCost' in salesRow).toBe(false);
-    expect(salesRow && 'stockValue' in salesRow).toBe(false);
-  });
-
-  test('stock_staff sees quantities but no lots on the variant detail', async () => {
-    type Detail = { variant: { sku: string }; onHand: number; lots?: unknown[] };
-    const owner = await jsonAs<Detail>(app, '/api/v1/inventory/var_hoe_std', 'owner');
-    const staff = await jsonAs<Detail>(app, '/api/v1/inventory/var_hoe_std', 'stock_staff');
-
-    expect(owner.lots?.length).toBeGreaterThan(0);
-    expect(staff.onHand).toBe(owner.onHand);
-    expect('lots' in staff).toBe(false);
-  });
-
   test('dashboard hides stockValue from sales', async () => {
     type Summary = { totalSkus: number; stockValue?: number; byChannel: unknown[] };
     const owner = await jsonAs<Summary>(app, '/api/v1/dashboard/summary', 'owner');
@@ -89,17 +62,6 @@ describe('cost hiding (the demo headline)', () => {
     expect(owner.stockValue).toBeGreaterThan(0);
     expect(sales.totalSkus).toBe(owner.totalSkus);
     expect('stockValue' in sales).toBe(false);
-  });
-
-  test('movement rows hide unitCost and totalCost from sales', async () => {
-    type Mv = { id: string; qtyDelta: number; unitCost?: number; totalCost?: number };
-    const owner = await jsonAs<{ items: Mv[] }>(app, '/api/v1/movements', 'owner');
-    const sales = await jsonAs<{ items: Mv[] }>(app, '/api/v1/movements', 'sales');
-
-    expect(owner.items[0]?.totalCost).toBeGreaterThan(0);
-    expect(sales.items[0]?.qtyDelta).toBe(owner.items[0]?.qtyDelta as number);
-    expect(sales.items[0] && 'unitCost' in sales.items[0]).toBe(false);
-    expect(sales.items[0] && 'totalCost' in sales.items[0]).toBe(false);
   });
 
   test('orders keep cogs for manager and lose it for sales', async () => {
@@ -139,34 +101,6 @@ describe('permissions', () => {
   test('an invalid date range fails validation', async () => {
     const res = await requestAs(app, '/api/v1/reports/cogs?from=2025-02-01&to=2025-01-01', 'owner');
     expect(res.status).toBe(400);
-  });
-});
-
-describe('query filters on the mock data', () => {
-  test('search narrows the inventory list', async () => {
-    const res = await jsonAs<{ items: { sku: string }[] }>(app, '/api/v1/inventory?q=SPR', 'owner');
-    expect(res.items).toHaveLength(1);
-    expect(res.items[0]?.sku).toBe('SPR-5L-01');
-  });
-
-  test('lowStock=true only returns rows at or below their threshold', async () => {
-    const res = await jsonAs<{ items: { sku: string }[] }>(
-      app,
-      '/api/v1/inventory?lowStock=true',
-      'owner',
-    );
-    expect(res.items.length).toBeGreaterThan(0);
-    expect(res.items.map((row) => row.sku)).toContain('SIC-M-02');
-  });
-
-  test('movements can be filtered by reason', async () => {
-    const res = await jsonAs<{ items: { reason: string }[] }>(
-      app,
-      '/api/v1/movements?reason=purchase_in',
-      'owner',
-    );
-    expect(res.items.every((movement) => movement.reason === 'purchase_in')).toBe(true);
-    expect(res.items.length).toBeGreaterThan(0);
   });
 });
 

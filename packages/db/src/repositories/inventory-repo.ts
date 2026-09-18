@@ -74,6 +74,49 @@ export const getOpenLotsForUpdate = async (
   }));
 };
 
+/** Read-only lot view for the variant detail screen. */
+export interface OpenLotRow {
+  id: string;
+  variantId: VariantId;
+  remainingQty: number;
+  receivedQty: number;
+  unitCost: number;
+  receivedAt: Date;
+  reference: string | null;
+}
+
+/**
+ * The `getOpenLotsForUpdate` query without `.for('update')`: a read path must
+ * never take row locks. It spans every warehouse because the detail screen
+ * shows the variant's whole position, and it keeps `receivedQty` / `reference`,
+ * which the locked FIFO query does not need but the UI renders next to the cost.
+ */
+export const listOpenLots = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId; variantId: VariantId },
+): Promise<OpenLotRow[]> => {
+  const rows = await exec
+    .select({
+      id: stockLots.id,
+      variantId: stockLots.variantId,
+      remainingQty: stockLots.remainingQty,
+      receivedQty: stockLots.qty,
+      unitCost: stockLots.unitCost,
+      receivedAt: stockLots.receivedAt,
+      reference: stockLots.reference,
+    })
+    .from(stockLots)
+    .where(
+      and(
+        eq(stockLots.orgId, params.orgId),
+        eq(stockLots.variantId, params.variantId),
+        gt(stockLots.remainingQty, 0),
+      ),
+    )
+    .orderBy(asc(stockLots.receivedAt), asc(stockLots.id));
+  return rows.map((row) => ({ ...row, variantId: asVariantId(row.variantId) }));
+};
+
 /** On-hand quantity per variant, derived from the open lots. */
 export const getOnHandByVariant = async (
   exec: DbExecutor,

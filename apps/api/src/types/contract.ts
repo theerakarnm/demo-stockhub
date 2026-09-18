@@ -91,20 +91,61 @@ export interface StockRow {
   lowStockThreshold: number;
 }
 
+/** One component row of a bundle variant (สินค้าชุด). */
+export interface BundleComponentRow {
+  componentVariantId: string;
+  sku: string;
+  name: string;
+  qtyPerBundle: number;
+  /** On-hand of the component, used to compute how many bundles are sellable. */
+  componentOnHand: number;
+}
+
+export interface VariantSummary {
+  id: string;
+  productId: string;
+  sku: string;
+  name: string;
+  kind: VariantKind;
+  unit: string;
+  sellingPrice: MoneyOnWire;
+  lowStockThreshold: number;
+  barcode?: string;
+  /** Only present when kind === 'bundle'. */
+  components?: BundleComponentRow[];
+}
+
 /** One FIFO layer as returned to the UI. The whole `lots` key is a cost field. */
 export interface StockLotView {
   id: string;
+  variantId: string;
   remainingQty: number;
+  /** What arrived; `remainingQty` never exceeds it. */
+  receivedQty: number;
+  /** cost field */
   unitCost: MoneyOnWire;
   receivedAt: string;
   reference?: string;
 }
 
 export interface VariantDetail {
-  variant: StockRow;
+  variant: VariantSummary;
   onHand: number;
+  reserved: number;
+  /** onHand - reserved; bundleAvailability() for a bundle. */
+  available: number;
   /** cost field (the key itself is stripped) */
   lots?: StockLotView[];
+}
+
+/** One FIFO slice of an outbound movement, as recorded in movement_lot_consumptions. */
+export interface MovementConsumption {
+  lotId: string;
+  qty: number;
+  /** cost field */
+  unitCost: MoneyOnWire;
+  /** cost field */
+  lineCost: MoneyOnWire;
 }
 
 export interface Movement {
@@ -115,16 +156,21 @@ export interface Movement {
   reason: MovementReason;
   /** Positive inbound, negative outbound. */
   qtyDelta: number;
+  /** Running balance of the variant right after this movement. */
   qtyAfter: number;
+  /** Where the stock physically moved. */
+  warehouseId: string;
   channelId?: string;
   orderId?: string;
+  note?: string;
+  occurredAt: string;
+  createdBy?: string;
   /** cost field */
   unitCost?: MoneyOnWire;
   /** cost field */
   totalCost?: MoneyOnWire;
-  note?: string;
-  occurredAt: string;
-  createdBy: string;
+  /** cost field */
+  consumptions?: MovementConsumption[];
 }
 
 export interface OrderLine {

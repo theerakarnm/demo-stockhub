@@ -20,10 +20,17 @@ export interface CursorPayload {
   id: string;
 }
 
-const toBase64Url = (raw: string): string =>
-  btoa(raw).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+// btoa/atob only speak Latin-1, but the sort keys in a cursor are user data
+// (Thai product names), so the string travels as UTF-8 bytes first.
+const toBase64Url = (raw: string): string => {
+  const binary = String.fromCharCode(...new TextEncoder().encode(raw));
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
 
-const fromBase64Url = (raw: string): string => atob(raw.replace(/-/g, '+').replace(/_/g, '/'));
+const fromBase64Url = (raw: string): string => {
+  const binary = atob(raw.replace(/-/g, '+').replace(/_/g, '/'));
+  return new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)));
+};
 
 export const encodeCursor = (payload: CursorPayload): string =>
   toBase64Url(JSON.stringify(payload));
