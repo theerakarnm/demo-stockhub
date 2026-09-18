@@ -132,26 +132,26 @@ The aggregate recipe is already written in the mock comment at the top of `apps/
 
 Owner: the orchestrator, on worktree 1.
 
-- [ ] P1 Merge `wave3-track-f`, then `wave3-track-h`, then `wave3-track-j` into `wave-1-core`, resolving `api-client.ts` and `api-types.ts` conflicts by keeping every section.
-- [ ] P2 Contract audit and leak scan: run the existing audits, extend `LEAK_SCAN_DB_PATHS` and the reverse audit for any new cost-bearing response fields (import cogs, dashboard stockValue, reports).
-- [ ] P3 Full verification with the shared database: typecheck, lint, `bun test` with `0 skip`.
-- [ ] P4 End-to-end journey per the section below.
+- [x] P1 Merge `wave3-track-f`, then `wave3-track-h`, then `wave3-track-j` into `wave-1-core`, resolving `api-client.ts` and `api-types.ts` conflicts by keeping every section.
+- [x] P2 Contract audit and leak scan: run the existing audits, extend `LEAK_SCAN_DB_PATHS` and the reverse audit for any new cost-bearing response fields (import cogs, dashboard stockValue, reports).
+- [x] P3 Full verification with the shared database: typecheck, lint, `bun test` with `0 skip`.
+- [x] P4 End-to-end journey per the section below.
 - [ ] P5 Tick this plan, update `apps/api/README.md` contract table, fast-forward `main`.
 
 ## End-to-end verification (orchestrator, on the merged branch)
 
-- Reset the shared database with `bun run db:migrate` and `bun run db:seed` against `stockhub`.
-- Start `wrangler dev --port 8788` for the api and `next dev --port 3100` for the web.
+- [x] Reset the shared database with `bun run db:migrate` and `bun run db:seed` against `stockhub`.
+- [x] Start `wrangler dev --port 8788` for the api and `next dev --port 3100` for the web.
 - Import journey with curl, role manager:
-  - `POST /api/v1/imports` with `packages/adapters/fixtures/lazada-orders.sample.csv` attached as multipart `file`, expect 201 and `preview_ready` with counts equal to the adapter fixture expectations.
-  - `GET /api/v1/imports/:id` shows the `willDeduct`, `needsMatch` and `skipped` groups.
-  - Record on-hand of one affected variant, `POST /api/v1/imports/:id/apply`, expect on-hand to drop by exactly the matched sold units and `cogs` in the result to be present for owner and absent for sales.
-  - Re-upload the same file: duplicate warning appears, apply is a no-op for already applied orders, stock unchanged.
-  - Upload a synthetic file where a previously applied order is cancelled: apply restores that order stock at the original cost.
+  - [x] `POST /api/v1/imports` with `packages/adapters/fixtures/lazada-orders.sample.csv` attached as multipart `file`, expect 201 and `preview_ready` with counts equal to the adapter fixture expectations.
+  - [x] `GET /api/v1/imports/:id` shows the `willDeduct`, `needsMatch` and `skipped` groups.
+  - [x] Record on-hand of one affected variant, `POST /api/v1/imports/:id/apply`, expect on-hand to drop by exactly the matched sold units and `cogs` in the result to be present for owner and absent for sales.
+  - [x] Re-upload the same file: duplicate warning appears, apply is a no-op for already applied orders, stock unchanged.
+  - [x] Upload a synthetic file where a previously applied order is cancelled: apply restores that order stock at the original cost.
 - Billing journey, role sales:
-  - Bill two units of a variant for a customer with a tier, confirm the unit price equals `/pricing/resolve`, stock drops, and `GET /orders/:id/print` returns printable Thai HTML with no cost keys anywhere.
-  - Cancel the bill, stock returns.
+  - [x] Bill two units of a variant for a customer with a tier, confirm the unit price equals `/pricing/resolve`, stock drops, and `GET /orders/:id/print` returns printable Thai HTML with no cost keys anywhere.
+  - [x] Cancel the bill, stock returns.
 - Dashboard journey:
-  - `/dashboard/summary`, `/reports/channel-sales` and `/reports/variance` return numbers consistent with the movements the two journeys just created.
-  - `stockValue` is present for owner and absent for sales and stock_staff.
+  - [x] `/dashboard/summary`, `/reports/channel-sales` and `/reports/variance` return numbers consistent with the movements the two journeys just created.
+  - [x] `stockValue` is present for owner and absent for sales and stock_staff.
 - Manual UI walkthrough left to the user: the import three-group screen, the billing screen, the print view, the dashboard cards.
