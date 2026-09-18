@@ -929,7 +929,6 @@ let mockOrders: Order[] = orderSeed.map(
         unitPrice: lineTotal,
         discount: 0,
         lineTotal,
-        unitCost: totalCost,
         totalCost,
       };
     });
@@ -1230,7 +1229,6 @@ export const mockApi = {
         unitPrice,
         discount,
         lineTotal: unitPrice * line.quantity - discount,
-        unitCost: variant.avgUnitCost,
         totalCost: variant.avgUnitCost * line.quantity,
       };
     });
@@ -1282,10 +1280,22 @@ export const mockApi = {
     };
   },
 
-  // FIFO restore runs server side; the demo has no cancel / return screen yet,
-  // so these only need to answer with the same shape the API would.
-  cancelOrder: (_id: string, _reason: string): Movement[] => [],
-  returnOrder: (_id: string, _lines: ReturnOrderLineInput[]): Movement[] => [],
+  getOrder: (id: string): Order => {
+    const order = mockOrders.find((o) => o.id === id);
+    if (!order) throw notFound(`ออเดอร์ ${id}`);
+    return gate(order);
+  },
+
+  // FIFO restore runs server side; the demo can only mirror the status flip
+  // and answer with the same shape the API would.
+  cancelOrder: (id: string, _reason: string): Movement[] => {
+    mockOrders = mockOrders.map((o) => (o.id === id ? { ...o, status: 'cancelled' } : o));
+    return [];
+  },
+  returnOrder: (id: string, _lines: ReturnOrderLineInput[]): Movement[] => {
+    mockOrders = mockOrders.map((o) => (o.id === id ? { ...o, status: 'returned' } : o));
+    return [];
+  },
 
   cogsReport: (query: CogsQuery = {}): CogsReportResponse => {
     const { role } = getDemoIdentity();

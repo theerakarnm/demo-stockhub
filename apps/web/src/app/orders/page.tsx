@@ -32,7 +32,7 @@ import {
 import { api } from '@/lib/api-client';
 import type { Order } from '@/lib/api-types';
 import { baht, formatDateTime, qty } from '@/lib/format';
-import { orderStatusOptions } from '@/lib/labels';
+import { CHANNEL_KIND_LABELS, orderStatusOptions } from '@/lib/labels';
 import { useApi } from '@/lib/use-api';
 import type { OrderStatus } from '@stockhub/core';
 import { ShoppingCart } from 'lucide-react';
@@ -151,12 +151,19 @@ export default function OrdersPage() {
                 {rows.map((order) => (
                   <Tr key={order.id}>
                     <Td className="font-mono text-xs text-slate-900">
-                      {order.externalOrderId ?? order.id}
+                      <Link
+                        href={`/orders/${order.id}`}
+                        className="hover:text-emerald-600 hover:underline"
+                      >
+                        {order.externalOrderId}
+                      </Link>
                     </Td>
                     <Td>
                       <div className="flex items-center gap-2">
                         <ChannelBadge kind={order.channelKind} />
-                        <span className="text-xs text-slate-500">{order.channelName}</span>
+                        <span className="text-xs text-slate-500">
+                          {order.channelName ?? CHANNEL_KIND_LABELS[order.channelKind]}
+                        </span>
                       </div>
                     </Td>
                     <Td>{order.customerName ?? '-'}</Td>

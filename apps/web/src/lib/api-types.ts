@@ -366,22 +366,25 @@ export interface OrderLine {
   unitPrice: MoneyAmount;
   discount: MoneyAmount;
   lineTotal: MoneyAmount;
-  /** cost-gated */
-  unitCost?: MoneyAmount;
-  /** cost-gated */
+  /** cost-gated - this line's share of the original sale cost. */
   totalCost?: MoneyAmount;
 }
 
 export interface Order {
   id: string;
-  orgId: string;
+  orgId?: string;
   channelId: string;
-  channelName: string;
+  /** Absent on the current wire contract; the UI falls back to the kind badge. */
+  channelName?: string;
   channelKind: ChannelKind;
   /** Bill number of record: a marketplace order number or a POS / wholesale bill number. */
   externalOrderId: string;
   status: OrderStatus;
+  /** Wholesale customer the bill was sold to, when it has one. */
+  customerId?: string;
   customerName?: string;
+  /** tier-gated */
+  priceTierId?: string;
   orderedAt: IsoDateTime;
   grandTotal: MoneyAmount;
   /** cost-gated */

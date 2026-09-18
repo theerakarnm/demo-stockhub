@@ -159,6 +159,13 @@ export const api = {
       () => request<OrdersResponse>(withQuery('/api/v1/orders', { ...query })),
     ),
 
+  /** GET /api/v1/orders/:id - one bill with its lines. */
+  getOrder: (id: string): Promise<Order> =>
+    demo(
+      () => mockApi.getOrder(id),
+      () => request<Order>(`/api/v1/orders/${encodeURIComponent(id)}`),
+    ),
+
   /** POST /api/v1/orders - POS / wholesale bill. */
   createOrder: (input: CreateOrderInput): Promise<Order> =>
     demo(
