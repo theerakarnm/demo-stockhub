@@ -13,10 +13,18 @@ import {
   NotImplementedError,
   type OrderStatus,
   type OrgId,
+  StockHubError,
 } from '@stockhub/core';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import type { DbExecutor } from '../client';
-import { type NewOrder, type NewOrderLine, type Order, orderLines, orders } from '../schema';
+import {
+  type NewOrder,
+  type NewOrderLine,
+  type Order,
+  type OrderLine,
+  orderLines,
+  orders,
+} from '../schema';
 
 /**
  * Insert or refresh one order.
@@ -98,19 +106,64 @@ export const resolveOrderLineMatch = async (
 };
 
 /**
- * React to a status change coming from a later export file.
- *
- * TODO(template) decision table:
- *   pending   -> shipped     : consume FIFO (sale_out)
- *   shipped   -> cancelled   : cancel_restore, using the ORIGINAL consumption
- *   delivered -> returned    : return_in, also using the original consumption
- *   pending   -> cancelled   : nothing moved yet, only update the status
- * Read the movements of the order first (listMovementsForOrder) so you never
- * restore stock that was never deducted.
+ * Read one order together with its lines - the shape every status mutation and
+ * every order detail response needs. Lines come back in insertion order so the
+ * bill renders the way it was typed.
  */
-export const applyStatusChange = async (
-  _exec: DbExecutor,
-  _params: { orgId: OrgId; orderId: string; nextStatus: OrderStatus },
-): Promise<void> => {
-  throw new NotImplementedError('applyStatusChange');
+export const getOrderWithLines = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId; orderId: string },
+): Promise<(Order & { lines: OrderLine[] }) | undefined> => {
+  const [order] = await exec
+    .select()
+    .from(orders)
+    .where(and(eq(orders.orgId, params.orgId), eq(orders.id, params.orderId)))
+    .limit(1);
+  if (!order) return undefined;
+  const lines = await exec
+    .select()
+    .from(orderLines)
+    .where(eq(orderLines.orderId, order.id))
+    .orderBy(asc(orderLines.createdAt));
+  return { ...order, lines };
+};
+
+/**
+ * Flip the status of one order and report what it was.
+ *
+ * The row is read FOR UPDATE first, so two writers racing on the same order
+ * (a platform webhook and the POS cancel button) serialise here instead of
+ * both planning stock movements for the same transition. `shippedAt` is set
+ * only when the new status is `shipped`; the ship moment is history and must
+ * survive later cancels and returns.
+ */
+export const setOrderStatus = async (
+  exec: DbExecutor,
+  params: {
+    orgId: OrgId;
+    orderId: string;
+    status: OrderStatus;
+    /** Business time of the cancellation, when the order is being cancelled. */
+    cancelledAt?: Date;
+  },
+): Promise<{ previous: OrderStatus }> => {
+  const [current] = await exec
+    .select({ status: orders.status })
+    .from(orders)
+    .where(and(eq(orders.orgId, params.orgId), eq(orders.id, params.orderId)))
+    .for('update');
+  if (!current) {
+    throw new StockHubError('not_found', `Order ${params.orderId} not found`, {
+      orderId: params.orderId,
+    });
+  }
+  await exec
+    .update(orders)
+    .set({
+      status: params.status,
+      cancelledAt: params.cancelledAt ?? null,
+      ...(params.status === 'shipped' ? { shippedAt: new Date() } : {}),
+    })
+    .where(and(eq(orders.orgId, params.orgId), eq(orders.id, params.orderId)));
+  return { previous: current.status };
 };

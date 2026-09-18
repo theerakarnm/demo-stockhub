@@ -8,14 +8,15 @@
  *      returns the same payload WITHOUT them to `sales`
  *
  * The inventory / variant / movement assertions moved to routes/inventory.test.ts,
- * which runs against the seeded database and skips without DATABASE_URL. The
- * tests here still run on the MOCK data in src/lib/mock-data.ts on purpose:
- * dashboard and orders keep rendering while their real queries are unbuilt.
+ * and the order assertions to routes/orders.test.ts - both run against the
+ * seeded database and skip without DATABASE_URL. The tests here still run on
+ * the MOCK data in src/lib/mock-data.ts on purpose: the dashboard keeps
+ * rendering while its real queries are unbuilt.
  */
 
 import { describe, expect, test } from 'bun:test';
 import { app } from './index';
-import { asRole, jsonAs, requestAs, testEnv } from './test-utils';
+import { jsonAs, requestAs, testEnv } from './test-utils';
 
 describe('health', () => {
   test('answers without auth or a database', async () => {
@@ -63,18 +64,6 @@ describe('cost hiding (the demo headline)', () => {
     expect(sales.totalSkus).toBe(owner.totalSkus);
     expect('stockValue' in sales).toBe(false);
   });
-
-  test('orders keep cogs for manager and lose it for sales', async () => {
-    type O = { id: string; grandTotal: number; cogs?: number; lines: { totalCost?: number }[] };
-    const manager = await jsonAs<{ items: O[] }>(app, '/api/v1/orders', 'manager');
-    const sales = await jsonAs<{ items: O[] }>(app, '/api/v1/orders', 'sales');
-
-    expect(manager.items[0]?.cogs).toBeGreaterThan(0);
-    expect(sales.items[0]?.grandTotal).toBe(manager.items[0]?.grandTotal as number);
-    expect(sales.items[0] && 'cogs' in sales.items[0]).toBe(false);
-    const firstLine = sales.items[0]?.lines[0];
-    expect(firstLine && 'totalCost' in firstLine).toBe(false);
-  });
 });
 
 describe('permissions', () => {
@@ -105,25 +94,6 @@ describe('permissions', () => {
 });
 
 describe('unfinished paths fail honestly', () => {
-  test('creating a POS bill returns 501 not_implemented, not a fake success', async () => {
-    const res = await app.request(
-      '/api/v1/orders',
-      {
-        method: 'POST',
-        headers: { ...asRole('sales').headers, 'content-type': 'application/json' },
-        body: JSON.stringify({
-          channelKind: 'pos',
-          customerName: 'ลูกค้าหน้าร้าน',
-          lines: [{ variantId: 'var_hoe_std', quantity: 1 }],
-        }),
-      },
-      testEnv,
-    );
-    expect(res.status).toBe(501);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('not_implemented');
-  });
-
   test('an unknown path uses the error envelope', async () => {
     const res = await requestAs(app, '/api/v1/nope', 'owner');
     expect(res.status).toBe(404);
