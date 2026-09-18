@@ -1,10 +1,8 @@
 /**
  * Shopee adapter tests.
  *
- * detect() is implemented, so the detect block MUST PASS.
- * parse() still has its TODO block, so the parse block is `test.skip` with the
- * assertions already written - delete `.skip` one test at a time as you fill in
- * TODO BLOCK 1 and TODO BLOCK 2 in adapter.ts. That is your TDD loop.
+ * detect() and parse() are both fully implemented, so nothing here is skipped:
+ * these assertions are the executable spec of the Shopee parse.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -43,7 +41,7 @@ describe('shopeeAdapter.detect', () => {
 });
 
 describe('shopeeAdapter.parse', () => {
-  test.skip('parses every order in the sample export', async () => {
+  test('parses every order in the sample export', async () => {
     const result = await shopeeAdapter.parse(loadFixture(SHOPEE_FIXTURE), ctx);
 
     expect(result.stats.rowsRead).toBe(5);
@@ -55,7 +53,7 @@ describe('shopeeAdapter.parse', () => {
     expect(ids).toEqual(['260214FAKE001', '260214FAKE002', '260215FAKE003', '260215FAKE004']);
   });
 
-  test.skip('groups the two rows of order 260214FAKE002 into one order', async () => {
+  test('groups the two rows of order 260214FAKE002 into one order', async () => {
     const result = await shopeeAdapter.parse(loadFixture(SHOPEE_FIXTURE), ctx);
     const order = result.orders.find((o) => o.externalOrderId === '260214FAKE002');
 
@@ -65,7 +63,7 @@ describe('shopeeAdapter.parse', () => {
     expect(order?.lines[1]?.quantity).toBe(3);
   });
 
-  test.skip('maps Thai statuses and Bangkok wall-clock dates', async () => {
+  test('maps Thai statuses and Bangkok wall-clock dates', async () => {
     const result = await shopeeAdapter.parse(loadFixture(SHOPEE_FIXTURE), ctx);
     const shipped = result.orders.find((o) => o.externalOrderId === '260214FAKE001');
     const cancelled = result.orders.find((o) => o.externalOrderId === '260215FAKE004');
@@ -76,7 +74,7 @@ describe('shopeeAdapter.parse', () => {
     expect(shipped?.orderedAt.toISOString()).toBe('2026-02-14T02:12:33.000Z');
   });
 
-  test.skip('reads "฿1,890.00" as satang', async () => {
+  test('reads "฿1,890.00" as satang', async () => {
     const result = await shopeeAdapter.parse(loadFixture(SHOPEE_FIXTURE), ctx);
     const order = result.orders.find((o) => o.externalOrderId === '260215FAKE003');
 
@@ -85,7 +83,7 @@ describe('shopeeAdapter.parse', () => {
     expect(order?.grandTotal).toBe(satang(180_000));
   });
 
-  test.skip('keeps the source rows in `raw` for support', async () => {
+  test('keeps the source rows in `raw` for support', async () => {
     const result = await shopeeAdapter.parse(loadFixture(SHOPEE_FIXTURE), ctx);
     expect(result.orders[0]?.raw).toBeDefined();
   });
