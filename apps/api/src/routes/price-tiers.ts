@@ -19,15 +19,11 @@ import { listMatrix, listTiers, putTierPrices } from '../services/pricing-servic
 import type { AppEnv } from '../types/app';
 
 export const priceTiersRouter = new Hono<AppEnv>()
-  .get(
-    '/',
-    requirePermission('price_tier:read'),
-    async (c) => ok(c, await listTiers(serviceContext(c))),
+  .get('/', requirePermission('price_tier:read'), async (c) =>
+    ok(c, await listTiers(serviceContext(c))),
   )
-  .get(
-    '/matrix',
-    requirePermission('price_tier:read'),
-    async (c) => ok(c, await listMatrix(serviceContext(c))),
+  .get('/matrix', requirePermission('price_tier:read'), async (c) =>
+    ok(c, await listMatrix(serviceContext(c))),
   )
   .put(
     '/:tierId/prices',
@@ -35,5 +31,8 @@ export const priceTiersRouter = new Hono<AppEnv>()
     validate('param', tierParam),
     validate('json', putTierPricesBody),
     async (c) =>
-      ok(c, await putTierPrices(serviceContext(c), c.req.valid('param').tierId, c.req.valid('json'))),
+      ok(
+        c,
+        await putTierPrices(serviceContext(c), c.req.valid('param').tierId, c.req.valid('json')),
+      ),
   );

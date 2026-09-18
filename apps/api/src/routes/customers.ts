@@ -25,11 +25,8 @@ import {
 import type { AppEnv } from '../types/app';
 
 export const customersRouter = new Hono<AppEnv>()
-  .get(
-    '/',
-    requirePermission('customer:read'),
-    validate('query', listCustomersQuery),
-    async (c) => ok(c, await listCustomers(serviceContext(c), c.req.valid('query'))),
+  .get('/', requirePermission('customer:read'), validate('query', listCustomersQuery), async (c) =>
+    ok(c, await listCustomers(serviceContext(c), c.req.valid('query'))),
   )
   .get(
     '/:customerId',
@@ -37,11 +34,8 @@ export const customersRouter = new Hono<AppEnv>()
     validate('param', customerParam),
     async (c) => ok(c, await getCustomer(serviceContext(c), c.req.valid('param').customerId)),
   )
-  .post(
-    '/',
-    requirePermission('customer:write'),
-    validate('json', customerInput),
-    async (c) => ok(c, await createCustomer(serviceContext(c), c.req.valid('json')), 201),
+  .post('/', requirePermission('customer:write'), validate('json', customerInput), async (c) =>
+    ok(c, await createCustomer(serviceContext(c), c.req.valid('json')), 201),
   )
   .patch(
     '/:customerId',
@@ -51,6 +45,10 @@ export const customersRouter = new Hono<AppEnv>()
     async (c) =>
       ok(
         c,
-        await updateCustomer(serviceContext(c), c.req.valid('param').customerId, c.req.valid('json')),
+        await updateCustomer(
+          serviceContext(c),
+          c.req.valid('param').customerId,
+          c.req.valid('json'),
+        ),
       ),
   );

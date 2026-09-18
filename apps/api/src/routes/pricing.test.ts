@@ -9,13 +9,13 @@
 
 import { afterAll, describe, expect, test } from 'bun:test';
 import {
+  type Role,
+  type Satang,
+  type VariantId,
   asOrgId,
   asPriceTierId,
   asVariantId,
   tierPriceKey,
-  type Role,
-  type Satang,
-  type VariantId,
 } from '@stockhub/core';
 import { SEED_IDS, createDb, pricingRepo } from '@stockhub/db';
 import { buildTestApp, jsonAs, requestAs } from '../test-utils';

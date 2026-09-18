@@ -29,7 +29,10 @@ export const listCustomers = async (
   query: { orgId: OrgId; q?: string; limit: number },
 ): Promise<CustomerWithTier[]> => {
   const search = query.q
-    ? or(ilike(customers.name, `%${query.q.trim()}%`), ilike(customers.phone, `%${query.q.trim()}%`))
+    ? or(
+        ilike(customers.name, `%${query.q.trim()}%`),
+        ilike(customers.phone, `%${query.q.trim()}%`),
+      )
     : undefined;
   return exec
     .select(customerWithTier)
@@ -62,10 +65,15 @@ export const createCustomer = async (exec: DbExecutor, values: NewCustomer): Pro
 export interface CustomerPatch {
   orgId: OrgId;
   customerId: CustomerId;
-  patch: Partial<Pick<NewCustomer, 'name' | 'phone' | 'email' | 'priceTierId' | 'note' | 'isActive'>>;
+  patch: Partial<
+    Pick<NewCustomer, 'name' | 'phone' | 'email' | 'priceTierId' | 'note' | 'isActive'>
+  >;
 }
 
-export const updateCustomer = async (exec: DbExecutor, params: CustomerPatch): Promise<Customer> => {
+export const updateCustomer = async (
+  exec: DbExecutor,
+  params: CustomerPatch,
+): Promise<Customer> => {
   const [row] = await exec
     .update(customers)
     .set(params.patch)

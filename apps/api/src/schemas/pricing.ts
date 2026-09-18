@@ -43,7 +43,12 @@ export type PutTierPricesBody = z.infer<typeof putTierPricesBody>;
 export const resolveQuery = z.object({
   variantIds: z
     .string()
-    .transform((s) => s.split(',').map((v) => v.trim()).filter(Boolean))
+    .transform((s) =>
+      s
+        .split(',')
+        .map((v) => v.trim())
+        .filter(Boolean),
+    )
     .pipe(z.array(idString).min(1).max(200)),
   customerId: idString.optional(),
   priceTierId: idString.optional(),

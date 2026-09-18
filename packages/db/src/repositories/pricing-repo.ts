@@ -20,7 +20,13 @@ import {
 } from '@stockhub/core';
 import { and, asc, eq, getTableColumns, inArray, sql } from 'drizzle-orm';
 import type { DbExecutor } from '../client';
-import { type PriceTier, type PriceTierPrice, priceTierPrices, priceTiers, variants } from '../schema';
+import {
+  type PriceTier,
+  type PriceTierPrice,
+  priceTierPrices,
+  priceTiers,
+  variants,
+} from '../schema';
 
 export const listTiers = async (exec: DbExecutor, params: { orgId: OrgId }): Promise<PriceTier[]> =>
   exec
@@ -85,7 +91,6 @@ export const upsertTierPrices = async (
   exec: DbExecutor,
   params: { orgId: OrgId; priceTierId: PriceTierId; prices: readonly TierPriceCellInput[] },
 ): Promise<{ upserted: number; deleted: number }> => {
-
   const isSetPrice = (cell: TierPriceCellInput): cell is { variantId: VariantId; price: Satang } =>
     cell.price !== null;
 

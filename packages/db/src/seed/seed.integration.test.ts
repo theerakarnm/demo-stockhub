@@ -34,7 +34,9 @@ describe.skipIf(!db)('seeded price tiers and customers', () => {
     if (!db) return;
     const rows = await db.select().from(priceTierPrices);
     expect(rows).toHaveLength(18);
-    expect(rows.filter((row) => row.priceTierId === SEED_IDS.priceTiers.wholesale)).toHaveLength(12);
+    expect(rows.filter((row) => row.priceTierId === SEED_IDS.priceTiers.wholesale)).toHaveLength(
+      12,
+    );
     expect(rows.filter((row) => row.priceTierId === SEED_IDS.priceTiers.dealer)).toHaveLength(6);
     expect(rows.filter((row) => row.priceTierId === SEED_IDS.priceTiers.retail)).toHaveLength(0);
   });

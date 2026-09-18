@@ -65,7 +65,7 @@ describe.skipIf(!url)('customer routes (seeded database)', () => {
   });
 
   test('q=สหกรณ์ finds exactly the cooperative', async () => {
-    const res = await requestAs(app, '/api/v1/customers?q=' + encodeURIComponent('สหกรณ์'), 'owner');
+    const res = await requestAs(app, `/api/v1/customers?q=${encodeURIComponent('สหกรณ์')}`, 'owner');
     expect(res.status).toBe(200);
     const body = (await res.json()) as { items?: CustomerWire[] } | CustomerWire[];
     const items = Array.isArray(body) ? body : (body.items ?? []);
@@ -89,7 +89,10 @@ describe.skipIf(!url)('customer routes (seeded database)', () => {
   test('patching priceTierId to null clears the tier fields', async () => {
     // CustomerInput.name is required on PATCH too (wire contract + Step 1
     // schema), so the patch body has to carry a name alongside the tier change.
-    const res = await patch(`/api/v1/customers/${createdId}`, { name: 'ร้านทดสอบ', priceTierId: null });
+    const res = await patch(`/api/v1/customers/${createdId}`, {
+      name: 'ร้านทดสอบ',
+      priceTierId: null,
+    });
     expect(res.status).toBe(200);
   });
 

@@ -16,8 +16,8 @@ import { describe, expect, test } from 'bun:test';
 import {
   type CustomerId,
   type PriceTierId,
-  type VariantId,
   StockHubError,
+  type VariantId,
   asCustomerId,
   asOrgId,
   asPriceTierId,
@@ -26,7 +26,7 @@ import {
   tierPriceKey,
 } from '@stockhub/core';
 import { TransactionRollbackError } from 'drizzle-orm';
-import { createDb, type DbExecutor } from '../client';
+import { type DbExecutor, createDb } from '../client';
 import { SEED_IDS } from '../seed/data';
 import { customerRepo, pricingRepo } from './index';
 
@@ -142,7 +142,11 @@ describe.skipIf(!db)('customer and pricing repositories', () => {
     if (!db) return;
     const missingId = asCustomerId(crypto.randomUUID() as CustomerId);
     try {
-      await customerRepo.updateCustomer(db, { orgId, customerId: missingId, patch: { isActive: false } });
+      await customerRepo.updateCustomer(db, {
+        orgId,
+        customerId: missingId,
+        patch: { isActive: false },
+      });
       throw new Error('expected updateCustomer to throw not_found');
     } catch (error) {
       expect(error instanceof StockHubError).toBe(true);

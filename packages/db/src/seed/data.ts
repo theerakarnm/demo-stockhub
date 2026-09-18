@@ -1137,7 +1137,6 @@ export const SEED_ORDER_LINES: NewOrderLine[] = [
   },
 ];
 
-
 /**
  * Wholesale price tiers.
  *
