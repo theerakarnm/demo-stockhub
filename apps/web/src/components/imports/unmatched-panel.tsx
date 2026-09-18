@@ -5,10 +5,10 @@
  * internal variant, so this panel is rendered first and coloured rose.
  */
 
-import { Button, Select, Table, TableWrap, Tbody, Td, Th, Thead, Tr } from '@/components/ui';
-import type { SelectOption } from '@/components/ui';
+import { VariantPicker } from '@/components/catalog/variant-picker';
+import { Button, Table, TableWrap, Tbody, Td, Th, Thead, Tr } from '@/components/ui';
 import type { UnmatchedSku } from '@/lib/api-types';
-import { percent, qty } from '@/lib/format';
+import { qty } from '@/lib/format';
 import { AlertTriangle, Link2 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -18,15 +18,6 @@ export interface UnmatchedPanelProps {
   pendingSku: string | null;
   onMatch: (platformSku: string, variantId: string) => void;
 }
-
-const suggestionOptions = (item: UnmatchedSku): SelectOption[] =>
-  item.suggestions.map((suggestion) => ({
-    value: suggestion.variantId,
-    label:
-      suggestion.score === undefined
-        ? `${suggestion.sku} - ${suggestion.name}`
-        : `${suggestion.sku} - ${suggestion.name} (คะแนน ${percent(suggestion.score, 0)})`,
-  }));
 
 export function UnmatchedPanel({ items, pendingSku, onMatch }: UnmatchedPanelProps) {
   // Only the rows the user touched live here; everything else falls back to the
@@ -60,7 +51,6 @@ export function UnmatchedPanel({ items, pendingSku, onMatch }: UnmatchedPanelPro
           </Thead>
           <Tbody className="bg-white">
             {items.map((item) => {
-              const options = suggestionOptions(item);
               const fallback = item.suggestions[0]?.variantId ?? '';
               const value = picked[item.platformSku] ?? fallback;
               const saving = pendingSku === item.platformSku;
@@ -72,40 +62,31 @@ export function UnmatchedPanel({ items, pendingSku, onMatch }: UnmatchedPanelPro
                   <Td numeric>{qty(item.occurrences)}</Td>
                   <Td numeric>{qty(item.quantity)}</Td>
                   <Td>
-                    {options.length === 0 ? (
-                      <span
-                        className="text-xs text-slate-500"
-                        title="ยังไม่มีสินค้าใกล้เคียงในระบบ ให้สร้างสินค้าก่อนแล้วอัปโหลดไฟล์ใหม่"
+                    {/* The picker searches the whole catalogue, so a row with no
+                        suggestions is still fixable here without leaving the screen. */}
+                    <div className="flex items-center gap-2">
+                      <VariantPicker
+                        ariaLabel={`เลือกสินค้าที่ตรงกับ ${item.platformSku}`}
+                        value={value}
+                        suggestions={item.suggestions}
+                        disabled={saving}
+                        onChange={(variantId) =>
+                          setPicked((current) => ({
+                            ...current,
+                            [item.platformSku]: variantId,
+                          }))
+                        }
+                      />
+                      <Button
+                        size="sm"
+                        loading={saving}
+                        disabled={value === ''}
+                        onClick={() => onMatch(item.platformSku, value)}
                       >
-                        ไม่มีสินค้าใกล้เคียงในระบบ
-                      </span>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        {/* TODO(template): add a full product search here for the
-                            case where none of the suggestions is right. */}
-                        <Select
-                          aria-label={`เลือกสินค้าที่ตรงกับ ${item.platformSku}`}
-                          options={options}
-                          value={value}
-                          disabled={saving}
-                          onChange={(event) =>
-                            setPicked((current) => ({
-                              ...current,
-                              [item.platformSku]: event.target.value,
-                            }))
-                          }
-                        />
-                        <Button
-                          size="sm"
-                          loading={saving}
-                          disabled={value === ''}
-                          onClick={() => onMatch(item.platformSku, value)}
-                        >
-                          <Link2 className="size-3.5" aria-hidden />
-                          จับคู่
-                        </Button>
-                      </div>
-                    )}
+                        <Link2 className="size-3.5" aria-hidden />
+                        จับคู่
+                      </Button>
+                    </div>
                   </Td>
                 </Tr>
               );
