@@ -10,6 +10,9 @@
 export * from './client';
 export * from './repositories';
 
+/** Seeded demo identity. Data only, no side effects, safe to import from apps. */
+export { SEED_IDS } from './seed/data';
+
 /** Tables, enums and relations, namespaced to keep the top level readable. */
 export * as schema from './schema';
 

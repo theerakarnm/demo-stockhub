@@ -16,8 +16,9 @@ export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:878
  */
 export const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE !== 'false';
 
-/** Placeholder org used by the x-demo-org header. Replaced by real auth later. */
-export const DEMO_ORG_ID = process.env.NEXT_PUBLIC_DEMO_ORG_ID ?? 'org_demo_0001';
+/** Seeded demo org used by the x-demo-org header. Replaced by real auth later. */
+export const DEMO_ORG_ID =
+  process.env.NEXT_PUBLIC_DEMO_ORG_ID ?? '0a000000-0000-4000-8000-000000000001';
 
 export const DEMO_ORG_NAME = process.env.NEXT_PUBLIC_DEMO_ORG_NAME ?? 'ร้านเกษตรรุ่งเรือง';
 
