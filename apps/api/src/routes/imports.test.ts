@@ -13,6 +13,7 @@ import { SEED_IDS, createDb } from '@stockhub/db';
 import { sql } from 'drizzle-orm';
 import { MemoryR2Bucket, buildTestApp, jsonAs, requestAs, testEnv } from '../test-utils';
 import { importsRouter } from './imports';
+import { inventoryRouter } from './inventory';
 
 const url = process.env.DATABASE_URL;
 const db = url ? createDb(url) : undefined;
@@ -51,6 +52,12 @@ const shopeeStyleFile = (rows: readonly string[]): File =>
   new File([new TextEncoder().encode([SHOPEE_HEADER, ...rows].join('\n'))], `run-${RUN}.csv`, {
     type: 'application/vnd.ms-excel',
   });
+
+/** One client for the whole file: only this hook closes it. */
+afterAll(async () => {
+  if (!db) return;
+  await db.$client.end();
+});
 
 /** POST the file exactly like the browser dropzone does: multipart form data. */
 const upload = (app: ReturnType<typeof buildTestApp>, file: File): Promise<Response> => {
@@ -97,12 +104,31 @@ describe.skipIf(!url)('import routes (seeded database)', () => {
 
   afterAll(async () => {
     if (!db) return;
-    // Batches only, in FK-safe order: this suite writes no orders yet, and
-    // later suites own the rows they create.
+    // Roll back in FK order: consumptions hang off movements, lines off
+    // orders, and both reference batches only softly. Movements are found by
+    // created_at because deleting an order nulls their order_id first.
+    await db.execute(
+      sql`delete from movement_lot_consumptions where movement_id in (
+        select id from stock_movements where created_at >= ${startedAt.toISOString()}
+      )`,
+    );
+    await db.execute(
+      sql`delete from stock_movements where created_at >= ${startedAt.toISOString()}`,
+    );
+    await db.execute(sql`delete from orders where created_at >= ${startedAt.toISOString()}`);
     await db.execute(
       sql`delete from import_batches where created_at >= ${startedAt.toISOString()}`,
     );
-    await db.$client.end();
+    // The learned listing must not leak into other suites or reruns.
+    await db.execute(
+      sql`delete from channel_listings where created_at >= ${startedAt.toISOString()}`,
+    );
+    // Reset the seed FIFO layers this suite consumed or restored. The spade is
+    // used here because no other suite moves its stock.
+    await db.execute(sql`
+      update stock_lots set remaining_qty = qty
+      where variant_id = ${SEED_IDS.variants.spade}
+    `);
   });
 
   test('uploading the shopee fixture parks a preview_ready batch', async () => {
@@ -250,5 +276,123 @@ describe.skipIf(!url)('import routes (seeded database)', () => {
     expect(line?.matchSource).toBe('listing_map');
     expect(line?.variantId).toBe(SEED_IDS.variants.glove);
     expect(detail.unmatched).toHaveLength(0);
+  });
+});
+
+describe.skipIf(!url)('import apply - the two lifelines of AGENTS.md rule 6', () => {
+  const app = buildTestApp((v1) =>
+    v1.route('/imports', importsRouter).route('/inventory', inventoryRouter),
+  );
+  const memoryBucket = new MemoryR2Bucket();
+
+  beforeAll(() => {
+    testEnv.IMPORTS_BUCKET = memoryBucket as unknown as R2Bucket;
+  });
+
+  afterAll(async () => {
+    if (!db) return;
+    await db.execute(
+      sql`delete from movement_lot_consumptions where movement_id in (
+        select id from stock_movements where created_at >= ${startedAt.toISOString()}
+      )`,
+    );
+    await db.execute(
+      sql`delete from stock_movements where created_at >= ${startedAt.toISOString()}`,
+    );
+    await db.execute(sql`delete from orders where created_at >= ${startedAt.toISOString()}`);
+    await db.execute(
+      sql`delete from import_batches where created_at >= ${startedAt.toISOString()}`,
+    );
+    await db.execute(sql`
+      update stock_lots set remaining_qty = qty
+      where variant_id = ${SEED_IDS.variants.spade}
+    `);
+  });
+
+  const RUN2 = Date.now().toString(36);
+  const shipRow = `${RUN2}-S01,จัดส่งแล้ว,,2026-02-21 09:00:00,2026-02-21 15:00:00,SPD-001,จอบขุดดิน,ด้ามไม้,2,165.00,0.00,330.00,buyer_s`;
+  // Lifeline 2 ships its own order number first, then a later export flips
+  // exactly that order to cancelled.
+  const shipRow2 = `${RUN2}-S02,จัดส่งแล้ว,,2026-02-22 09:00:00,2026-02-22 15:00:00,SPD-001,จอบขุดดิน,ด้ามไม้,2,165.00,0.00,330.00,buyer_t`;
+  const cancelRow = `${RUN2}-S02,ยกเลิกแล้ว,ยกเลิกโดยผู้ซื้อ,2026-02-22 09:00:00,,SPD-001,จอบขุดดิน,ด้ามไม้,2,165.00,0.00,330.00,buyer_t`;
+
+  interface ApplyWire {
+    movementsCreated: number;
+    ordersApplied: number;
+    cogs?: number;
+  }
+  interface OnHandWire {
+    onHand: number;
+  }
+  interface GroupWire {
+    groups: { willDeduct: unknown[]; skipped: { reason: string }[] };
+    issues: { code: string }[];
+  }
+
+  /** Upload rows, then confirm the batch; returns the apply result. */
+  const uploadAndApply = async (rows: readonly string[]): Promise<ApplyWire> => {
+    const uploadRes = await upload(app, shopeeStyleFile(rows));
+    expect(uploadRes.status).toBe(201);
+    const created = (await uploadRes.json()) as { id: string };
+    const applyRes = await requestAs(app, `/api/v1/imports/${created.id}/apply`, 'owner', {
+      method: 'POST',
+    });
+    expect(applyRes.status).toBe(200);
+    return (await applyRes.json()) as ApplyWire;
+  };
+
+  const spadeOnHand = async (): Promise<number> => {
+    const detail = await jsonAs<OnHandWire>(
+      app,
+      `/api/v1/inventory/${SEED_IDS.variants.spade}`,
+      'owner',
+    );
+    return detail.onHand;
+  };
+
+  test('lifeline 1: applying the same file twice deducts exactly once', async () => {
+    const before = await spadeOnHand();
+
+    const first = await uploadAndApply([shipRow]);
+    expect(first.movementsCreated).toBe(1);
+    expect(first.ordersApplied).toBe(1);
+    // 2 units out of the oldest spade lot at 108.00 baht each.
+    expect(first.cogs).toBe(21_600);
+    expect(await spadeOnHand()).toBe(before - 2);
+
+    // The same bytes arrive again in a NEW batch: the checksum warns, the
+    // preview moves the order to skipped, and apply moves no stock.
+    const second = await upload(app, shopeeStyleFile([shipRow]));
+    expect(second.status).toBe(201);
+    const created = (await second.json()) as { id: string };
+    const preview = await jsonAs<GroupWire>(app, `/api/v1/imports/${created.id}`, 'owner');
+    expect(preview.issues.some((issue) => issue.code === 'duplicate_checksum')).toBe(true);
+    expect(preview.groups.willDeduct).toHaveLength(0);
+    expect(preview.groups.skipped).toHaveLength(1);
+    expect(preview.groups.skipped[0]?.reason).toBe('already_imported');
+
+    const applyRes = await requestAs(app, `/api/v1/imports/${created.id}/apply`, 'owner', {
+      method: 'POST',
+    });
+    expect(applyRes.status).toBe(200);
+    const result = (await applyRes.json()) as ApplyWire;
+    expect(result.movementsCreated).toBe(0);
+    expect(result.cogs).toBe(0);
+    expect(await spadeOnHand()).toBe(before - 2);
+  });
+
+  test('lifeline 2: a later file that cancels the order restores the original cost', async () => {
+    const before = await spadeOnHand();
+    const applied = await uploadAndApply([shipRow2]);
+    expect(applied.cogs).toBe(21_600);
+    expect(await spadeOnHand()).toBe(before - 2);
+
+    // Same platform order number, now cancelled by the buyer in the export.
+    const applied2 = await uploadAndApply([cancelRow]);
+    expect(applied2.movementsCreated).toBe(1);
+    // The restore re-credits the EXACT slices the sale consumed (108.00 x 2),
+    // not today's cost from the newer lot.
+    expect(applied2.cogs).toBe(-21_600);
+    expect(await spadeOnHand()).toBe(before);
   });
 });

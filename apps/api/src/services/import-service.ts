@@ -29,25 +29,34 @@
 import { detectAdapter, getAdapter } from '@stockhub/adapters';
 import {
   IMPORTABLE_CHANNEL_KINDS,
-  NotImplementedError,
   StockHubError,
   asChannelId,
   asImportBatchId,
+  asOrderId,
   asVariantId,
+  asWarehouseId,
+  expandBundles,
   importObjectKey,
   matchSku,
+  planMovements,
   satang,
+  stockEffectOf,
 } from '@stockhub/core';
 import type {
   ImportBatchId,
   ImportableChannelKind,
+  LotConsumption,
   MatchCandidate,
   MatchIndex,
+  MovementRequestLine,
   NormalizedOrder,
+  OrderStatus,
   OrgId,
   ParseIssue,
   ParseResult,
   RawImportFile,
+  Satang,
+  StockLot,
   VariantId,
 } from '@stockhub/core';
 import {
@@ -61,7 +70,9 @@ import {
   catalogRepo,
   channelRepo,
   importRepo,
+  inventoryRepo,
   listingRepo,
+  movementRepo,
   orderRepo,
   schema,
 } from '@stockhub/db';
@@ -572,11 +583,251 @@ export const saveManualMatch = async (
  * and is stripped for roles without `cost:read` by lib/response.ts.
  */
 export const applyImport = async (
-  _ctx: ServiceContext,
-  _batchId: ImportBatchId,
-  _body: ApplyImportBody,
-): Promise<ApplyImportResult> => {
-  throw new NotImplementedError('applyImport');
+  ctx: ServiceContext,
+  batchId: ImportBatchId,
+  body: ApplyImportBody,
+): Promise<ApplyImportResult> =>
+  ctx.db().transaction(async (tx) => {
+    const orgId = ctx.auth.orgId;
+
+    // 1. Re-read FOR UPDATE: a double click on "ยืนยัน" runs this twice, and
+    //    only the first caller can ever see status 'preview_ready'.
+    const batch = await importRepo.getBatchForUpdate(tx, { orgId, batchId });
+    if (!batch) {
+      throw new StockHubError('not_found', `Import batch ${batchId} not found`, { batchId });
+    }
+    if (batch.status !== 'preview_ready') {
+      throw new StockHubError('conflict', 'แฟ้มนี้ไม่ได้อยู่ในสถานะรอยืนยัน จึงนำเข้าซ้ำไม่ได้', {
+        batchId,
+        status: batch.status,
+      });
+    }
+    const payload = batch.preview;
+    if (!payload) {
+      throw new StockHubError('conflict', 'แฟ้มนี้ยังไม่มีผลการอ่านไฟล์', { batchId });
+    }
+    if (batch.channelId === null) {
+      throw new StockHubError('conflict', 'แฟ้มนี้ยังไม่ผูกกับช่องทางขาย', { batchId });
+    }
+    const channelId = asChannelId(batch.channelId);
+
+    // 2. All-or-nothing gate: an unmatched SKU blocks the whole batch unless
+    //    the caller explicitly leaves those orders for later.
+    let orders = payload.orders;
+    if (payload.unmatched.length > 0 && !body.ignoreUnmatched) {
+      throw new StockHubError('unmatched_sku', 'ยังมี SKU ที่จับคู่ไม่ได้ ต้องจับคู่ให้ครบก่อนยืนยันนำเข้า', {
+        unmatched: payload.unmatched.map((group) => group.platformSku),
+      });
+    }
+    if (body.ignoreUnmatched) {
+      // A half-matched order would deduct the matched lines and silently drop
+      // the rest, so the whole order waits instead of moving partially.
+      const hasUnmatched = (order: PreviewOrderPayload): boolean =>
+        order.lines.some((line) => line.matchSource === 'unmatched');
+      orders = orders.filter((order) => !hasUnmatched(order));
+    }
+
+    const now = ctx.clock.now();
+    const warehouse = await inventoryRepo.getDefaultWarehouse(tx, { orgId });
+    const warehouseId = asWarehouseId(warehouse.id);
+    const componentsByBundle = await catalogRepo.getBundleComponentMap(tx, { orgId });
+
+    // 3. Duplicate detection is per (channelId, externalOrderId) - the
+    //    lifeline that keeps a re-import from deducting stock twice.
+    const existingOrders = await orderRepo.listOrdersByExternalIds(tx, {
+      orgId,
+      channelId,
+      externalIds: orders.map((order) => order.externalOrderId),
+    });
+    const existingByExternal = new Map(
+      existingOrders.map((order) => [order.externalOrderId, order]),
+    );
+
+    let movementsCreated = 0;
+    let ordersApplied = 0;
+    let cogs = 0;
+
+    for (const order of orders) {
+      const existing = existingByExternal.get(order.externalOrderId);
+      // What did the sale already do to stock? Without this history a cancel
+      // in the file could not restore the ORIGINAL cost of the sale.
+      const previousMovements = existing
+        ? await movementRepo.listMovementsForOrder(tx, { orgId, orderId: existing.id })
+        : [];
+      const hadSaleOut = previousMovements.some((movement) => movement.reason === 'sale_out');
+      const effect = resolveStockEffect(existing?.status, order.status, hadSaleOut);
+      if (effect === 'invalid') {
+        throw new StockHubError(
+          'validation_error',
+          `สถานะออเดอร์ ${order.externalOrderId} เปลี่ยนจาก ${existing?.status} เป็น ${order.status} ไม่ได้`,
+          { externalOrderId: order.externalOrderId },
+        );
+      }
+
+      // 3b. Upsert is idempotent on (channelId, externalOrderId): a repeated
+      //     file refreshes the row and keeps the first import's audit trail.
+      const savedOrder = await orderRepo.upsertOrder(tx, {
+        orgId,
+        channelId,
+        externalOrderId: order.externalOrderId,
+        status: order.status,
+        orderedAt: new Date(order.orderedAt),
+        shippedAt: order.shippedAt ? new Date(order.shippedAt) : null,
+        cancelledAt: order.status === 'cancelled' || order.status === 'returned' ? now : null,
+        buyerName: order.buyerName ?? null,
+        grandTotal: order.grandTotal,
+        importBatchId: batchId,
+        raw: { source: 'import', importBatchId: batchId },
+      });
+      await orderRepo.replaceOrderLines(tx, {
+        orderId: savedOrder.id,
+        lines: order.lines.map((line) => ({
+          orgId,
+          orderId: savedOrder.id,
+          variantId: line.variantId,
+          platformSku: line.platformSku,
+          platformProductName: line.platformProductName,
+          variationName: line.variationName,
+          qty: line.quantity,
+          unitPrice: line.unitPrice,
+          discount: line.discount,
+          matchSource: line.matchSource,
+        })),
+      });
+      ordersApplied += 1;
+      if (effect === 'none') continue;
+
+      if (effect === 'consume') {
+        // 4. A bundle owns no stock: its lines expand into components first.
+        const expanded = expandBundles(
+          order.lines.flatMap((line) =>
+            line.variantId ? [{ variantId: asVariantId(line.variantId), qty: line.quantity }] : [],
+          ),
+          componentsByBundle,
+        );
+        // 5. Lock every affected variant's open lots, one global order by
+        //    variant id, so two concurrent batches queue instead of deadlock.
+        const lotsByVariant = new Map<VariantId, readonly StockLot[]>();
+        for (const variantId of [...new Set(expanded.map((line) => line.variantId))].sort()) {
+          lotsByVariant.set(
+            variantId,
+            await inventoryRepo.getOpenLotsForUpdate(tx, { orgId, variantId, warehouseId }),
+          );
+        }
+        // 6./7. The sale already happened in the real world, so a missing lot
+        // is a reported shortfall, never a refused import.
+        const planned = planMovements(
+          {
+            reason: 'sale_out',
+            warehouseId,
+            channelId,
+            orderId: asOrderId(savedOrder.id),
+            occurredAt: new Date(order.shippedAt ?? order.orderedAt),
+            note: `นำเข้าไฟล์ ${batch.fileName}`,
+            lines: expanded,
+            shortagePolicy: 'shortfall',
+          },
+          { lotsByVariant },
+        );
+        const recorded = await movementRepo.recordMovements(tx, {
+          orgId,
+          planned,
+          createdBy: ctx.auth.userId,
+          orderId: savedOrder.id,
+          channelId,
+        });
+        movementsCreated += recorded.length;
+        cogs = satang(cogs + recorded.reduce((sum, movement) => sum + movement.costTotal, 0));
+        continue;
+      }
+
+      // effect === 'restore': put back exactly what the sale took, at the
+      // cost the sale consumed - never repriced at today's lot cost.
+      const reason = order.status === 'returned' ? 'return_in' : 'cancel_restore';
+      const { outstanding, slicesByVariant } = outstandingSales(previousMovements);
+      const lines: MovementRequestLine[] = [];
+      for (const [variantId, qty] of outstanding) {
+        const restore = slicesByVariant.get(variantId) ?? [];
+        if (qty <= 0 || restore.length === 0) continue;
+        lines.push({ variantId, qty, restore });
+      }
+      const planned = planMovements(
+        {
+          reason,
+          warehouseId,
+          channelId,
+          orderId: asOrderId(savedOrder.id),
+          occurredAt: now,
+          note: `ยกเลิก/คืนสินค้าจากไฟล์ ${batch.fileName}`,
+          lines,
+        },
+        // Restores re-credit recorded slices, so no lots need locking to plan.
+        { lotsByVariant: new Map() },
+      );
+      const recorded = await movementRepo.recordMovements(tx, {
+        orgId,
+        planned,
+        createdBy: ctx.auth.userId,
+        orderId: savedOrder.id,
+        channelId,
+      });
+      movementsCreated += recorded.length;
+      cogs = satang(cogs - recorded.reduce((sum, movement) => sum + movement.costTotal, 0));
+    }
+
+    // 8. Commit the lifecycle marker last; everything above rolled back if it threw.
+    await importRepo.updateBatch(tx, batchId, { status: 'applied', appliedAt: now });
+
+    return { movementsCreated, ordersApplied, cogs };
+  });
+
+/**
+ * The stock answer for one order, using the same table the POS flow uses.
+ *
+ * A NEW order never consults stockEffectOf: the platform says the goods
+ * already left (shipped/delivered), while confirmed and pending must not move
+ * stock - stockEffectOf would call pending -> confirmed invalid, which is a
+ * POS-transition answer, not an import answer.
+ * For an EXISTING order the same-status case is a duplicate row in an
+ * overlapping file: a no-op, not the error stockEffectOf returns.
+ */
+const resolveStockEffect = (
+  existing: OrderStatus | undefined,
+  fileStatus: OrderStatus,
+  alreadyMoved: boolean,
+): 'consume' | 'restore' | 'none' | 'invalid' => {
+  if (!existing) {
+    return fileStatus === 'shipped' || fileStatus === 'delivered' ? 'consume' : 'none';
+  }
+  if (existing === fileStatus) return 'none';
+  return stockEffectOf(existing, fileStatus, alreadyMoved);
+};
+
+/**
+ * Units still out with the buyer per variant, and the exact lot slices the
+ * sale consumed. Restore movements reduce the outstanding count, so a cancel
+ * imported after a partial return can never push a lot past its received qty.
+ */
+const outstandingSales = (
+  movements: readonly movementRepo.OrderMovementRow[],
+): {
+  outstanding: Map<VariantId, number>;
+  slicesByVariant: Map<VariantId, LotConsumption[]>;
+} => {
+  const outstanding = new Map<VariantId, number>();
+  const slicesByVariant = new Map<VariantId, LotConsumption[]>();
+  for (const movement of movements) {
+    const variantId = asVariantId(movement.variantId);
+    if (movement.reason === 'sale_out') {
+      outstanding.set(variantId, (outstanding.get(variantId) ?? 0) - movement.qtyDelta);
+      const slices = slicesByVariant.get(variantId) ?? [];
+      slices.push(...movement.consumptions);
+      slicesByVariant.set(variantId, slices);
+    } else if (movement.reason === 'return_in' || movement.reason === 'cancel_restore') {
+      outstanding.set(variantId, (outstanding.get(variantId) ?? 0) - movement.qtyDelta);
+    }
+  }
+  return { outstanding, slicesByVariant };
 };
 
 /** List batches for the imports screen, newest first. */
