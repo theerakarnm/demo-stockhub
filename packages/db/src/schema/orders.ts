@@ -26,9 +26,11 @@ import {
 import { money, primaryId, timestamps, tsColumn } from './_shared';
 import { variants } from './catalog';
 import { channels } from './channels';
+import { customers } from './customers';
 import { matchSourceEnum, orderStatusEnum } from './enums';
 import { importBatches } from './imports';
 import { orgIdColumn } from './org';
+import { priceTiers } from './pricing';
 
 export const orders = pgTable(
   'orders',
@@ -50,6 +52,12 @@ export const orders = pgTable(
     grandTotal: money('grand_total').notNull().default(0),
     /** Which upload produced this order. Null for POS and wholesale. */
     importBatchId: uuid('import_batch_id').references(() => importBatches.id, {
+      onDelete: 'set null',
+    }),
+    /** Shop customer behind a POS/wholesale bill. Null for marketplace imports. */
+    customerId: uuid('customer_id').references(() => customers.id, { onDelete: 'set null' }),
+    /** Tier snapshot at bill time, kept even if the customer's tier changes later. */
+    priceTierId: uuid('price_tier_id').references(() => priceTiers.id, {
       onDelete: 'set null',
     }),
     /** The original export row(s), verbatim. Support answers questions with it. */

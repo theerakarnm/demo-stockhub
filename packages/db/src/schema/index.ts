@@ -14,4 +14,6 @@ export * from './channels';
 export * from './inventory';
 export * from './orders';
 export * from './imports';
+export * from './customers';
+export * from './pricing';
 export * from './relations';
