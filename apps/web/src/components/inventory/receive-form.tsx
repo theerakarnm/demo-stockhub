@@ -11,9 +11,12 @@
 import { CostLockedNote, CostValue } from '@/components/cost-value';
 import { ProductPicker } from '@/components/orders/product-picker';
 import { useRole } from '@/components/role-provider';
+import { useTour } from '@/components/tour/tour-provider';
+import { TOUR_IDS, TOUR_STEPS } from '@/components/tour/tour-steps';
 import { Button, Card, CardBody, CardHeader, Input, buttonClass } from '@/components/ui';
 import { api } from '@/lib/api-client';
 import type { ReceiveStockInput, StockRow } from '@/lib/api-types';
+import { GUIDED_DEMO } from '@/lib/config';
 import { qty, toDateInputValue } from '@/lib/format';
 import { buildReceivePayload } from '@/lib/receive-form';
 import type { ReceiveFormState } from '@/lib/receive-form';
@@ -79,6 +82,42 @@ export function ReceiveForm() {
     setFormError('');
     void receiveStock.run(payload);
   }, [form, receiveStock]);
+
+  // Walkthrough helper: prefill the form from the active receive step, so a
+  // first-time viewer clicks twice instead of typing four values (scene 2/3).
+  // Renders nothing unless the guided-demo flag is on AND the tour is on a
+  // receive step.
+  const tour = useTour();
+  const tourStep = tour?.state
+    ? TOUR_STEPS.find((s) => s.step === tour.state.currentStep)
+    : undefined;
+  const receiveSample = tourStep?.sample?.kind === 'receive' ? tourStep.sample : undefined;
+
+  const fillSample = useCallback(() => {
+    if (!receiveSample) return;
+    const ureaRow: StockRow = {
+      variantId: TOUR_IDS.ureaVariantId,
+      sku: receiveSample.sku,
+      name: 'ปุ๋ยยูเรีย 46-0-0 (ขนาด 50 กก.)',
+      kind: 'simple',
+      unit: 'กระสอบ',
+      onHand: 0,
+      reserved: 0,
+      available: 0,
+      sellingPrice: 145000,
+      lowStockThreshold: 20,
+    };
+    setPicked(ureaRow);
+    setFormError('');
+    setForm({
+      variantId: ureaRow.variantId,
+      qty: String(receiveSample.qty),
+      unitCostBaht: String(receiveSample.unitCostBaht),
+      reference: receiveSample.reference,
+      receivedAt: receiveSample.receivedAt,
+      note: `รับสินค้าเข้าคลัง ${receiveSample.reference}`,
+    });
+  }, [receiveSample]);
 
   const movement = receiveStock.result;
   if (movement) {
@@ -147,6 +186,16 @@ export function ReceiveForm() {
       <Card>
         <CardHeader title="ข้อมูลการรับ" description="ระบบจะเปิดล็อตต้นทุน FIFO ให้อัตโนมัติ" />
         <CardBody className="space-y-4">
+          {GUIDED_DEMO && receiveSample ? (
+            <button
+              type="button"
+              onClick={fillSample}
+              className="w-full rounded-lg border border-dashed border-emerald-400 bg-emerald-50/60 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-50"
+            >
+              กรอกค่าตัวอย่าง ({receiveSample.sku} {receiveSample.qty} กระสอบ ทุน{' '}
+              {receiveSample.unitCostBaht.toLocaleString('th-TH')} บาท)
+            </button>
+          ) : null}
           <div className="grid gap-3 sm:grid-cols-2">
             <Input
               label="จำนวน"
