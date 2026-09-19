@@ -77,6 +77,15 @@ export const MATCH_SOURCES = [
 ] as const;
 export type MatchSource = (typeof MATCH_SOURCES)[number];
 
+/** Where an order's platform fee came from. Stored per order; never recomputed. */
+export const FEE_SOURCES = [
+  'none', // POS / wholesale / manual bills, or orders from before fees existed
+  'manual', // a person typed the fee on the order page
+  'channel_default', // computed from channels.fee_rate_bps at import time
+  'exported', // reserved: a future settlement-file pipeline
+] as const;
+export type FeeSource = (typeof FEE_SOURCES)[number];
+
 /** simple = one SKU, bundle = made of other variants (สินค้าชุด). */
 export const VARIANT_KINDS = ['simple', 'bundle'] as const;
 export type VariantKind = (typeof VARIANT_KINDS)[number];

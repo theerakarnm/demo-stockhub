@@ -10,7 +10,8 @@
  * itself. This table is what turns a painful monthly import into a click.
  */
 
-import { boolean, index, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { boolean, check, index, integer, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { primaryId, timestamps } from './_shared';
 import { variants } from './catalog';
 import { channelKindEnum, matchSourceEnum } from './enums';
@@ -27,11 +28,14 @@ export const channels = pgTable(
     /** Shop id on the platform. Useful later for an API adapter. */
     externalShopId: text('external_shop_id'),
     isActive: boolean('is_active').notNull().default(true),
+    /** Default marketplace commission in basis points (1400 = 14.00%). 0 for own channels. */
+    feeRateBps: integer('fee_rate_bps').notNull().default(0),
     ...timestamps,
   },
   (table) => [
     index('channels_org_idx').on(table.orgId),
     index('channels_org_kind_idx').on(table.orgId, table.kind),
+    check('channels_fee_rate_bps_range', sql`${table.feeRateBps} >= 0 AND ${table.feeRateBps} <= 10000`),
   ],
 );
 

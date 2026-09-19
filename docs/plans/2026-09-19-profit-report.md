@@ -202,6 +202,7 @@ Never print or commit `PG_URL`; it stays a shell value.
 ### PERISHABLE - recapture before task L0
 
 - [Podman machine and the Postgres container are up] - Check: `podman ps --format '{{.Names}} {{.Status}}' | grep stockhub-postgres && pg_isready -h localhost -p 5435` - Needed by: Tasks L1, L3, L4, L5, L6 and end-to-end. If down: `podman machine start && podman start stockhub-postgres`.
+  > Deviation (2026-09-19, run start): another agent session was concurrently executing its own plan against the shared `stockhub-postgres` (5435) and its seed TRUNCATE cycles corrupted DB-backed verifies both ways. With the user's approval this run now owns a PRIVATE database: container `stockhub-postgres-profit` (same image postgres:16-alpine, same creds, host port 5436), and this checkout's `.env` + `apps/api/.dev.vars` were repointed 5435 -> 5436. The shared 5435 container is untouched. All DB commands in this plan now resolve to 5436 through the same files, so no command changes. Ownership proof: migrate + seed green, `pg_stat_activity` shows only this run's connections.
 - [`.env` carries a local DATABASE_URL] - Check: `grep -c '^DATABASE_URL=postgresql://localhost:5435/' .env` prints `1` (shape check only, never print the value) - Needed by: everything above.
   > Deviation: the grep prints `0` because the real URL carries credentials before the host (`postgresql://***@localhost:5435/stockhub`, masked). The substance holds - exactly one `DATABASE_URL` line, host `localhost:5435`, db `stockhub` - and `db:migrate` + `db:seed` ran green against it. Re-verified 2026-09-19 at the start of this run.
 - [The shared `stockhub` database is migrated and freshly seeded] - Check: `DATABASE_URL="$PG_URL" bun run db:migrate && DATABASE_URL="$PG_URL" bun run db:seed` ends with "Seed complete"; measured output: 30 lots, 2822 units, stock value 379,245 baht, 4 orders / 7 lines - Needed by: all DB verifies. Re-seed also between experiments; the seed is idempotent (TRUNCATE list in `packages/db/src/seed/index.ts:54-72`).
@@ -236,13 +237,13 @@ Never print or commit `PG_URL`; it stays a shell value.
 **Gotcha:** the four baseline-failing tests are NOT broken by this plan and must not be "fixed" here. They fail because bun executes test files concurrently (default `--max-concurrency=20`) and the import suites mutate the shared ledger while the seed-absolute suites read it. Measured evidence: after a fresh `db:seed` the invariant query returns 0 broken rows; `bun test packages/db/src/guards.integration.test.ts` alone right after a full suite fails; `bun test --max-concurrency=1` prints 268 pass / 0 fail.
 
 **Steps:**
-- [x] Step 1: Change the root script to
+- [ ] Step 1: Change the root script to
       ```json
       "test": "bun test --max-concurrency=1",
       ```
       and add one `//`-style reason where the script block allows a comment line above it in the scripts object (JSON has no comments - instead, if `package.json` has no place for the why, note it in the commit body: "DB-backed suites share one Postgres; serialized files keep the seed-absolute assertions deterministic").
-- [x] Step 2: Verify - Run: `bun run test` twice in a row - Expected: both runs print `268 pass` / `0 fail` (with `DATABASE_URL` unset they print fewer passes and `0 fail` because DB suites skip; run with `.env` present, which `bun test` loads by itself).
-- [x] Step 3: Commit - `git commit -m "Serialize bun test files for deterministic DB suites"`
+- [ ] Step 2: Verify - Run: `bun run test` twice in a row - Expected: both runs print `268 pass` / `0 fail` (with `DATABASE_URL` unset they print fewer passes and `0 fail` because DB suites skip; run with `.env` present, which `bun test` loads by itself).
+- [ ] Step 3: Commit - `git commit -m "Serialize bun test files for deterministic DB suites"`
 
 #### Task L1: Fee source enum, order fee columns, channel rate, migration
 
@@ -273,7 +274,7 @@ Never print or commit `PG_URL`; it stays a shell value.
 **Rollback:** the migration is additive. To reverse on a dev database: `DROP COLUMN` the two order columns and the channel column, `DROP TYPE fee_source`, delete the generated `0003_*` files and the journal entry. Nothing backfills data, so nothing else rewinds.
 
 **Steps:**
-- [ ] Step 1: In `packages/core/src/domain/enums.ts` append
+- [x] Step 1: In `packages/core/src/domain/enums.ts` append
       ```ts
       /** Where an order's platform fee came from. Stored per order; never recomputed. */
       export const FEE_SOURCES = [
@@ -284,8 +285,8 @@ Never print or commit `PG_URL`; it stays a shell value.
       ] as const;
       export type FeeSource = (typeof FEE_SOURCES)[number];
       ```
-- [ ] Step 2: Mirror in `packages/db/src/schema/enums.ts` (import type, `feeSourceEnum`, `ENUM_SYNC_GUARD.feeSource`).
-- [ ] Step 3: In `packages/db/src/schema/orders.ts` add after `grandTotal`
+- [x] Step 2: Mirror in `packages/db/src/schema/enums.ts` (import type, `feeSourceEnum`, `ENUM_SYNC_GUARD.feeSource`).
+- [x] Step 3: In `packages/db/src/schema/orders.ts` add after `grandTotal`
       ```ts
       /** Platform commission + payment fee actually charged, in satang. Written once at
        *  entry; a re-import or rate change never rewrites it (see upsertOrder). */
@@ -294,20 +295,21 @@ Never print or commit `PG_URL`; it stays a shell value.
       feeSource: feeSourceEnum('fee_source').notNull().default('none'),
       ```
       and a `check('orders_platform_fee_nonneg', sql`${table.platformFee} >= 0`)` next to `orders_grand_total_nonneg` (`packages/db/src/schema/orders.ts:78`).
-- [ ] Step 4: In `packages/db/src/schema/channels.ts` add
+- [x] Step 4: In `packages/db/src/schema/channels.ts` add
       ```ts
       /** Default marketplace commission in basis points (1400 = 14.00%). 0 for own channels. */
       feeRateBps: integer('fee_rate_bps').notNull().default(0),
       ```
       plus `check('channels_fee_rate_bps_range', sql`${table.feeRateBps} >= 0 AND ${table.feeRateBps} <= 10000`)`; import `integer` and `sql` if missing.
-- [ ] Step 5: Generate and read the migration: `cd packages/db && DATABASE_URL="$PG_URL" bunx drizzle-kit generate --name platform_fees` - Expected: the SQL contains `CREATE TYPE "fee_source"`, two `ALTER TABLE "orders" ADD COLUMN`, one `ALTER TABLE "channels" ADD COLUMN`, exactly two `ADD CONSTRAINT ... CHECK` (the two this task writes; `money()` adds no constraint), and no `DROP`.
-- [ ] Step 6: Seed the demo rates on the six marketplace channels in `SEED_CHANNELS` (`shopeeMain`/`shopeeBranch` `feeRateBps: 1400`, `lazadaMain`/`lazadaMall` `1300`, `tiktokMain`/`tiktokLive` `1200`), each line annotated
+- [x] Step 5: Generate and read the migration: `cd packages/db && DATABASE_URL="$PG_URL" bunx drizzle-kit generate --name platform_fees` - Expected: the SQL contains `CREATE TYPE "fee_source"`, two `ALTER TABLE "orders" ADD COLUMN`, one `ALTER TABLE "channels" ADD COLUMN`, exactly two `ADD CONSTRAINT ... CHECK` (the two this task writes; `money()` adds no constraint), and no `DROP`.
+  > Deviation: the Expected string `CREATE TYPE "fee_source"` appears namespaced as `CREATE TYPE "public"."fee_source"` in the generated SQL; same statement, all other Expected conditions hold exactly.
+- [x] Step 6: Seed the demo rates on the six marketplace channels in `SEED_CHANNELS` (`shopeeMain`/`shopeeBranch` `feeRateBps: 1400`, `lazadaMain`/`lazadaMall` `1300`, `tiktokMain`/`tiktokLive` `1200`), each line annotated
       ```ts
       // VERIFY: guessed demo rate, check against the customer's real commission schedule.
       ```
       POS / wholesale / manual channels stay on the 0 default.
-- [ ] Step 7: Verify - Run: `DATABASE_URL="$PG_URL" bun run db:migrate && DATABASE_URL="$PG_URL" bun run db:seed` - Expected: both exit 0, seed prints "Seed complete"; then `cd packages/db && DATABASE_URL="$PG_URL" bunx drizzle-kit generate --name noop` prints "No schema changes, nothing to migrate"; then `bun run typecheck` exits 0 in all packages.
-- [ ] Step 8: Commit - `git commit -m "Add platform fee columns and fee source enum"`
+- [x] Step 7: Verify - Run: `DATABASE_URL="$PG_URL" bun run db:migrate && DATABASE_URL="$PG_URL" bun run db:seed` - Expected: both exit 0, seed prints "Seed complete"; then `cd packages/db && DATABASE_URL="$PG_URL" bunx drizzle-kit generate --name noop` prints "No schema changes, nothing to migrate"; then `bun run typecheck` exits 0 in all packages.
+- [x] Step 8: Commit - `git commit -m "Add platform fee columns and fee source enum"`
 
 #### Task L2: Core fee + profit math, pure and tested
 
@@ -654,4 +656,3 @@ Run on the merged branch with the shared database freshly seeded, `wrangler dev 
 
 - 2026-09-19, round 1 (`/skill:scrutinize` via a fresh subagent, no planning context): verdict FIX FIRST with 1 blocker and 5 majors. All applied: the fixture-date window vs report window (E2E split into a fixture-window step and a today step), the fee wire mapping moved into `toWireOrder`, the return-sign inversion in the L5 fixture (positive `qty_delta` plus explicit formulas), the `.extend` on a refined zod schema (object restated), the flat client naming (`getProfitReport` / `setOrderFee` / `getChannels`), and the migration count (three at base, L1 generates 0003). Five nits applied: leak-scan wording, two CHECK constraints, six marketplace channels, three citation line fixes, and the D3 re-import wrinkle. Round 2 reviewer dispatched after these fixes.
 - 2026-09-19, round 2 (fresh subagent, `/skill:scrutinize`): verdict SHIP - all six round-1 fixes verified against the tree, independent pass found no blocker and no major. Four nits applied: `mockApi.profitReport` flat sibling name, the fixture date span corrected to createTime 2026-02-14..15 with a do-not-tighten warning, the db-side row type renamed `ProfitLedgerRow` to avoid colliding with the wire type, and the E2E fee expectation restated as integer round-half-up. Plan ready to execute.
-      > Deviation: first four verify attempts failed with 8-10 seed-absolute failures - a concurrent executor session in `~/.treehouse/stockhub-demo-ec2393` was looping `lint` + `db:seed` + `bun test` against the same shared Postgres, and its TRUNCATE-on-seed corrupted in-flight runs. Waited for its processes to stop, re-seeded, and both back-to-back runs then printed `268 pass` / `0 fail`. Later DB-backed verifies must check for a foreign `bun test` process before trusting a failure.

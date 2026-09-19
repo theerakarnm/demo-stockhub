@@ -180,6 +180,7 @@ export const SEED_CHANNELS: NewChannel[] = [
     kind: 'shopee',
     name: 'Shopee - ร้านหลัก',
     externalShopId: 'shp-100001',
+    feeRateBps: 1400, // VERIFY: guessed demo rate, check against the customer's real commission schedule.
   },
   {
     id: SEED_IDS.channels.shopeeBranch,
@@ -187,6 +188,7 @@ export const SEED_CHANNELS: NewChannel[] = [
     kind: 'shopee',
     name: 'Shopee - ร้านสาขา 2',
     externalShopId: 'shp-100002',
+    feeRateBps: 1400, // VERIFY: guessed demo rate, check against the customer's real commission schedule.
   },
   {
     id: SEED_IDS.channels.lazadaMain,
@@ -194,6 +196,7 @@ export const SEED_CHANNELS: NewChannel[] = [
     kind: 'lazada',
     name: 'Lazada - ร้านหลัก',
     externalShopId: 'lzd-200001',
+    feeRateBps: 1300, // VERIFY: guessed demo rate, check against the customer's real commission schedule.
   },
   {
     id: SEED_IDS.channels.lazadaMall,
@@ -201,6 +204,7 @@ export const SEED_CHANNELS: NewChannel[] = [
     kind: 'lazada',
     name: 'Lazada - LazMall',
     externalShopId: 'lzd-200002',
+    feeRateBps: 1300, // VERIFY: guessed demo rate, check against the customer's real commission schedule.
   },
   {
     id: SEED_IDS.channels.tiktokMain,
@@ -208,6 +212,7 @@ export const SEED_CHANNELS: NewChannel[] = [
     kind: 'tiktok',
     name: 'TikTok Shop - ร้านหลัก',
     externalShopId: 'tts-300001',
+    feeRateBps: 1200, // VERIFY: guessed demo rate, check against the customer's real commission schedule.
   },
   {
     id: SEED_IDS.channels.tiktokLive,
@@ -215,6 +220,7 @@ export const SEED_CHANNELS: NewChannel[] = [
     kind: 'tiktok',
     name: 'TikTok Shop - ไลฟ์สด',
     externalShopId: 'tts-300002',
+    feeRateBps: 1200, // VERIFY: guessed demo rate, check against the customer's real commission schedule.
   },
   {
     id: SEED_IDS.channels.pos,

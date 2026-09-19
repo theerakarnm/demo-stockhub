@@ -27,7 +27,7 @@ import { money, primaryId, timestamps, tsColumn } from './_shared';
 import { variants } from './catalog';
 import { channels } from './channels';
 import { customers } from './customers';
-import { matchSourceEnum, orderStatusEnum } from './enums';
+import { feeSourceEnum, matchSourceEnum, orderStatusEnum } from './enums';
 import { importBatches } from './imports';
 import { orgIdColumn } from './org';
 import { priceTiers } from './pricing';
@@ -50,6 +50,11 @@ export const orders = pgTable(
     buyerName: text('buyer_name'),
     /** Sum of line totals after discount, in satang. */
     grandTotal: money('grand_total').notNull().default(0),
+    /** Platform commission + payment fee actually charged, in satang. Written once at
+     *  entry; a re-import or rate change never rewrites it (see upsertOrder). */
+    platformFee: money('platform_fee').notNull().default(0),
+    /** Which of FEE_SOURCES produced platformFee. */
+    feeSource: feeSourceEnum('fee_source').notNull().default('none'),
     /** Which upload produced this order. Null for POS and wholesale. */
     importBatchId: uuid('import_batch_id').references(() => importBatches.id, {
       onDelete: 'set null',
@@ -76,6 +81,7 @@ export const orders = pgTable(
     index('orders_org_status_idx').on(table.orgId, table.status),
     index('orders_import_batch_idx').on(table.importBatchId),
     check('orders_grand_total_nonneg', sql`${table.grandTotal} >= 0`),
+    check('orders_platform_fee_nonneg', sql`${table.platformFee} >= 0`),
   ],
 );
 
