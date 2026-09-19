@@ -396,6 +396,9 @@ export interface OrderLine {
   totalCost?: MoneyAmount;
 }
 
+/** Where an order's platform fee came from; mirror of `FeeSource` in @stockhub/core. */
+export type FeeSource = 'none' | 'manual' | 'channel_default' | 'exported';
+
 export interface Order {
   id: string;
   orgId?: string;
@@ -417,6 +420,10 @@ export interface Order {
   cogs?: MoneyAmount;
   /** cost-gated - grandTotal minus cogs, as computed by the API. */
   margin?: MoneyAmount;
+  /** cost-gated - the platform fee the channel charged on this bill. */
+  platformFee?: MoneyAmount;
+  /** cost-gated - how platformFee got its value; 'manual' means a person typed it. */
+  feeSource?: FeeSource;
   lines: OrderLine[];
 }
 
@@ -569,4 +576,84 @@ export interface CogsQuery {
   from?: string;
   /** Bangkok calendar date, 'YYYY-MM-DD'. Inclusive. */
   to?: string;
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/reports/profit - requires the `cost:read` permission
+// ---------------------------------------------------------------------------
+
+/** One order's profit line of GET /reports/profit: ledger sums plus fee math.
+ *  The whole endpoint answers 403 without cost:read, so the optional cost
+ *  fields here only document the wire shape. */
+export interface ProfitOrderRow {
+  id: string;
+  externalOrderId: string;
+  channelId: string;
+  channelName: string;
+  channelKind: ChannelKind;
+  status: OrderStatus;
+  orderedAt: IsoDateTime;
+  unitsSold: number;
+  unitsReturned: number;
+  revenue: MoneyAmount;
+  /** cost-gated */
+  fee?: MoneyAmount;
+  /** cost-gated */
+  cogs?: MoneyAmount;
+  /** cost-gated - the identity is profit = revenue - fee - cogs. */
+  profit?: MoneyAmount;
+  /** cost-gated */
+  feeSource?: FeeSource;
+}
+
+/** One channel's profit summed over the whole report window. */
+export interface ChannelProfitRow {
+  channelId: string;
+  channelName: string;
+  channelKind: ChannelKind;
+  orders: number;
+  unitsSold: number;
+  unitsReturned: number;
+  revenue: MoneyAmount;
+  /** cost-gated */
+  fee?: MoneyAmount;
+  /** cost-gated */
+  cogs?: MoneyAmount;
+  /** cost-gated */
+  profit?: MoneyAmount;
+}
+
+export interface ProfitReportResponse {
+  from: string;
+  to: string;
+  channelId?: string;
+  /** Untruncated order count for the window. */
+  ordersInWindow: number;
+  /** Newest first, capped at the query's `limit`. */
+  rows: ProfitOrderRow[];
+  /** Biggest profit first; covers the whole window, never just `rows`. */
+  channelRows: ChannelProfitRow[];
+  /** Covers the whole window, never just the returned page. */
+  totals: {
+    orders: number;
+    unitsSold: number;
+    unitsReturned: number;
+    revenue: MoneyAmount;
+    /** cost-gated */
+    fee?: MoneyAmount;
+    /** cost-gated */
+    cogs?: MoneyAmount;
+    /** cost-gated */
+    profit?: MoneyAmount;
+  };
+}
+
+export interface ProfitQuery {
+  /** Bangkok calendar date, 'YYYY-MM-DD'. Inclusive. */
+  from: string;
+  /** Bangkok calendar date, 'YYYY-MM-DD'. Inclusive. */
+  to: string;
+  channelId?: string;
+  /** Cap on returned rows; aggregates always cover the whole window. */
+  limit?: number;
 }
