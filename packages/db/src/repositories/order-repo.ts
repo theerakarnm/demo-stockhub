@@ -195,7 +195,10 @@ export const setOrderStatus = async (
 // ---------------------------------------------------------------------------
 
 /** Statuses that cancel a sale out of the net sales reports. */
-const NOT_A_SALE: readonly OrderStatus[] = ['cancelled', 'returned'];
+/** A cancelled order never moved stock, and a returned one gave it back - so
+ *  neither may count as sold. Movement-side readers (dashboard sums, the COGS
+ *  report) must exclude exactly these statuses too, or the reports disagree. */
+export const NOT_A_SALE: readonly OrderStatus[] = ['cancelled', 'returned'];
 
 export interface ChannelSalesRow {
   channelId: string;

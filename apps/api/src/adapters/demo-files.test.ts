@@ -33,7 +33,7 @@ describe('demo export files', () => {
     ] as const) {
       const detected = await detectAdapter(await load(name));
       expect(detected?.kind).toBe(kind);
-      expect(detected!.confidence).toBeGreaterThanOrEqual(0.6);
+      expect(detected?.confidence ?? 0).toBeGreaterThanOrEqual(0.6);
     }
   });
 

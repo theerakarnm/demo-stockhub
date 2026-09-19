@@ -18,17 +18,19 @@ import {
   asVariantId,
   satang,
 } from '@stockhub/core';
-import { and, asc, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lte, notInArray, sql } from 'drizzle-orm';
 import type { DbExecutor } from '../client';
 import {
-  channels,
+  type channels,
   movementLotConsumptions,
+  orders,
   products,
   stockLots,
   stockMovements,
   variants,
 } from '../schema';
 import { applyLotDeltas } from './inventory-repo';
+import { NOT_A_SALE } from './order-repo';
 
 export interface RecordMovementsInput {
   orgId: OrgId;
@@ -333,7 +335,14 @@ export const listMovementsForOrder = async (
 // 'Asia/Bangkok') and the window edges can never disagree.
 // ---------------------------------------------------------------------------
 
-/** Units sold (sale_out) since an instant, whole org. Signed positive. */
+/**
+ * Units sold (sale_out) since an instant, whole org. Signed positive.
+ *
+ * Orders whose status is NOT_A_SALE (cancelled / returned) are excluded, so a
+ * cancelled bill stops counting as sold the moment it is cancelled - the same
+ * rule sumChannelSales uses, which is what keeps the dashboard and the
+ * reports telling one story.
+ */
 export const sumUnitsSoldSince = async (
   exec: DbExecutor,
   params: { orgId: OrgId; since: Date },
@@ -343,11 +352,13 @@ export const sumUnitsSoldSince = async (
       units: sql<number>`coalesce(sum(-${stockMovements.qtyDelta}), 0)::int`.as('units'),
     })
     .from(stockMovements)
+    .innerJoin(orders, eq(orders.id, stockMovements.orderId))
     .where(
       and(
         eq(stockMovements.orgId, params.orgId),
         eq(stockMovements.reason, 'sale_out'),
         gte(stockMovements.occurredAt, params.since),
+        notInArray(orders.status, [...NOT_A_SALE]),
       ),
     );
   return Number(row?.units ?? 0);
@@ -372,37 +383,48 @@ export const sumSalesByChannelSince = async (
   exec: DbExecutor,
   params: { orgId: OrgId; since: Date },
 ): Promise<ChannelSalesTodayRow[]> => {
-  // Outer references stay table-qualified so the correlation cannot drift if
-  // this query ever loses its join (a bare name would resolve to ol.*).
-  const revenuePerMovement = sql`(
-    select coalesce(sum(ol.qty * ol.unit_price - ol.discount), 0)
-    from order_lines ol
-    where ol.order_id = stock_movements.order_id
-      and ol.variant_id = stock_movements.variant_id
-  )`;
-  const rows = await exec
-    .select({
-      channelId: sql<string>`${stockMovements.channelId}`.as('channel_id'),
-      kind: channels.kind,
-      name: channels.name,
-      unitsSold: sql<number>`sum(-${stockMovements.qtyDelta})::int`.as('units_sold'),
-      revenue: sql<number>`coalesce(sum(${revenuePerMovement}), 0)::bigint`.as('revenue'),
-    })
-    .from(stockMovements)
-    .innerJoin(channels, eq(channels.id, stockMovements.channelId))
-    .where(
-      and(
-        eq(stockMovements.orgId, params.orgId),
-        eq(stockMovements.reason, 'sale_out'),
-        gte(stockMovements.occurredAt, params.since),
-      ),
+  // Aggregate PER ORDER first. A bundle order writes one movement per
+  // component while its single line carries the bundle's price, so a
+  // movement-level revenue join either double counts or (matched on variant)
+  // never fires at all. Per order: units from the movements, revenue from the
+  // order's own lines, and NOT_A_SALE orders dropped wholesale.
+  const rows = (await exec.execute(sql`
+    with sale_order as (
+      select m.channel_id,
+             m.order_id,
+             -sum(m.qty_delta) as units
+      from stock_movements m
+      join orders o on o.id = m.order_id
+      where m.org_id = ${params.orgId}
+        and m.reason = 'sale_out'
+        and m.occurred_at >= ${params.since.toISOString()}
+        and o.status not in ('cancelled', 'returned')
+      group by m.channel_id, m.order_id
     )
-    .groupBy(stockMovements.channelId, channels.kind, channels.name);
+    select so.channel_id,
+           c.kind,
+           c.name,
+           sum(so.units)::int as units_sold,
+           coalesce(sum((
+             select coalesce(sum(ol.qty * ol.unit_price - ol.discount), 0)
+             from order_lines ol
+             where ol.order_id = so.order_id
+           )), 0)::bigint as revenue
+    from sale_order so
+    join channels c on c.id = so.channel_id
+    group by so.channel_id, c.kind, c.name
+  `)) as unknown as Array<{
+    channel_id: string;
+    kind: ChannelSalesTodayRow['kind'];
+    name: string;
+    units_sold: number;
+    revenue: string | number;
+  }>;
   return rows.map((row) => ({
-    channelId: row.channelId,
+    channelId: row.channel_id,
     kind: row.kind,
     name: row.name,
-    unitsSold: Number(row.unitsSold),
+    unitsSold: Number(row.units_sold),
     revenue: Number(row.revenue),
   }));
 };
@@ -503,45 +525,54 @@ export const listCogsByDayChannel = async (
   exec: DbExecutor,
   params: { orgId: OrgId; from: Date; to: Date },
 ): Promise<CogsDayChannelRow[]> => {
-  const dayExpr = sql<string>`to_char(${stockMovements.occurredAt} at time zone 'Asia/Bangkok', 'YYYY-MM-DD')`;
-  const rows = await exec
-    .select({
-      day: dayExpr.as('day'),
-      channelId: sql<string>`${stockMovements.channelId}`.as('channel_id'),
-      unitsSold: sql<number>`sum(-${stockMovements.qtyDelta})::int`.as('units_sold'),
-      // The outer references are written table-qualified on purpose: in a
-      // single-table query drizzle emits bare column names, and inside the
-      // subquery a bare order_id / movement_id would resolve to the INNER
-      // table, silently correlating to nothing.
-      revenue: sql<number>`coalesce(sum((
-          select coalesce(sum(ol.qty * ol.unit_price - ol.discount), 0)
-          from order_lines ol
-          where ol.order_id = stock_movements.order_id
-            and ol.variant_id = stock_movements.variant_id
-        )), 0)::bigint`.as('revenue'),
-      cogs: sql<number>`coalesce(sum((
-          select coalesce(sum(mlc.line_cost), 0)
-          from movement_lot_consumptions mlc
-          where mlc.movement_id = stock_movements.id
-        )), 0)::bigint`.as('cogs'),
-    })
-    .from(stockMovements)
-    .where(
-      and(
-        eq(stockMovements.orgId, params.orgId),
-        eq(stockMovements.reason, 'sale_out'),
-        gte(stockMovements.occurredAt, params.from),
-        lte(stockMovements.occurredAt, params.to),
-        // A sale always carries a channel; guard anyway so the wire type holds.
-        sql`${stockMovements.channelId} is not null`,
-      ),
+  // Aggregate PER ORDER, then per day and channel. The old movement-level
+  // version had two defects the guided demo would have shown a client:
+  //   - revenue joined on variant_id, which never fires for a bundle order
+  //     (the line holds the bundle id, the movements hold the components), and
+  //   - a cancelled order's sale_out rows kept counting as sold.
+  // Per order: revenue = the order's own lines, cogs = every lot slice its
+  // sale movements consumed, and NOT_A_SALE orders are dropped entirely - the
+  // same rule sumChannelSales applies, so the reports tell one story.
+  const rows = (await exec.execute(sql`
+    with sale_order as (
+      select
+        m.channel_id,
+        to_char(min(m.occurred_at) at time zone 'Asia/Bangkok', 'YYYY-MM-DD') as day,
+        -sum(m.qty_delta) as units,
+        (select coalesce(sum(ol.qty * ol.unit_price - ol.discount), 0)
+           from order_lines ol
+          where ol.order_id = m.order_id) as revenue,
+        (select coalesce(sum(mlc.line_cost), 0)
+           from movement_lot_consumptions mlc
+          where mlc.movement_id in (
+            select m2.id from stock_movements m2 where m2.order_id = m.order_id
+          )) as cogs
+      from stock_movements m
+      join orders o on o.id = m.order_id
+      where m.org_id = ${params.orgId}
+        and m.reason = 'sale_out'
+        and m.occurred_at >= ${params.from.toISOString()}
+        and m.occurred_at <= ${params.to.toISOString()}
+        and m.channel_id is not null
+        and o.status not in ('cancelled', 'returned')
+      group by m.order_id, m.channel_id
     )
-    .groupBy(dayExpr, stockMovements.channelId)
-    .orderBy(desc(dayExpr), stockMovements.channelId);
+    select day, channel_id, sum(units)::int as units_sold,
+           sum(revenue)::bigint as revenue, sum(cogs)::bigint as cogs
+    from sale_order
+    group by day, channel_id
+    order by day desc, channel_id
+  `)) as unknown as Array<{
+    day: string;
+    channel_id: string;
+    units_sold: number;
+    revenue: string | number;
+    cogs: string | number;
+  }>;
   return rows.map((row) => ({
     day: row.day,
-    channelId: row.channelId,
-    unitsSold: Number(row.unitsSold),
+    channelId: row.channel_id,
+    unitsSold: Number(row.units_sold),
     revenue: Number(row.revenue),
     cogs: Number(row.cogs),
   }));
