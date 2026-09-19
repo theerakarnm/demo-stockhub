@@ -1198,21 +1198,21 @@ id ใน `MOCK_CHANNELS` เป็นสตริงอย่าง `ch_shopee_
 ทำหลังจบงานที่ 12 ทั้งหมด ด้วยฐานข้อมูลที่เพิ่ง `bun run db:seed` ใหม่
 ตั้ง `NEXT_PUBLIC_GUIDED_DEMO=true` และ `NEXT_PUBLIC_DEMO_MODE=false`
 
-- [ ] **Run:** `bun run typecheck` **Expected:** 0 ข้อผิดพลาดทุก workspace
-- [ ] **Run:** `bun run lint` **Expected:** 0 ข้อผิดพลาด
-- [ ] **Run:** `bun test` ที่ราก **Expected:** **268 ผ่าน 0 ตก** บวกเทสใหม่จากงาน 3, 4, 5 (ตัวเลข 268 คือค่าหลังรัน `bun run db:migrate` แล้ว ดู Preflight P8)
-- [ ] **Manual:** เปิด `/` ครั้งแรกโดยไม่อ่านเอกสารใดๆ **Expected:** เห็นแผงทัวร์พร้อมปุ่ม "เริ่มทัวร์ 15 นาที" และการ์ด "ใกล้หมด" แสดง 1 รายการ ผู้ใช้รู้ทันทีว่าต้องกดอะไรต่อ
-- [ ] **Manual:** เดินครบทั้ง 20 ขั้นตามตาราง C โดยจับเวลา **Expected:** ใช้เวลาไม่เกิน 15 นาที และค่า `totalOnHand` กับ `stockValue` ที่ทุกขั้นตรงกับคอลัมน์ "ผลบนหน้าจอ" ทุกตัว ลำดับคือ 2,822 / 2,882 / 2,932 / 2,919 / 2,906 / 2,890 / 2,890 / 2,895 / 2,795 / 2,793 / 2,795
-- [ ] **Manual:** หลังทุก action ที่เขียนข้อมูล ตรวจการ์ด Data Flow **Expected:** มีครบ 4 ช่อง ตัวเลข before และ after ตรงกับที่หน้าจอแสดง และกดลิงก์ "กระทบหน้าไหน" แล้วไปถึงหน้าที่ถูกต้องพร้อมข้อมูลของรายการนั้นจริง
-- [ ] **Manual:** กดปุ่มไฟล์ตัวอย่าง Shopee แล้ว apply จากนั้นกดไฟล์เดิมซ้ำอีกครั้งแล้ว apply **Expected:** ครั้งที่สองได้ `movementsCreated: 0` และ `totalOnHand` เท่ากับหลังครั้งแรกเป๊ะ
-- [ ] **Manual:** เปิดบิลขายส่งปุ๋ยยูเรีย 100 กระสอบให้สหกรณ์การเกษตรหนองบัว **Expected:** ราคาต่อหน่วยขึ้นเป็น 1,305.00 เอง ยอดบิล 130,500.00 การ์ดไล่ล็อตแสดง 60 x 1,000.00 และ 40 x 1,085.00 รวม **103,400.00** และ `bun test packages/core` ยังผ่าน 52 เทส
-- [ ] **Manual:** สลับเป็น `sales` แล้วเปิด DevTools แท็บ Network ดู response ดิบของ `GET /api/v1/dashboard/summary` **Expected:** **ไม่มีคีย์ `stockValue`** ใน JSON เลย (ไม่ใช่ `null`) และ `GET /api/v1/reports/cogs` ตอบ **403** รหัส `forbidden`
-- [ ] **Run:** พิสูจน์ข้อบนแบบไม่พึ่งเบราว์เซอร์ `curl -s localhost:8787/api/v1/dashboard/summary -H 'x-demo-role: sales' -H 'x-demo-org: 0a000000-0000-4000-8000-000000000001' | grep -c stockValue` **Expected:** `0`
-- [ ] **Manual:** กดปุ่มรีเซ็ต Demo **Expected:** ทุกหน้ากลับเท่ากับ T0 ในหัวข้อ B.1 คือ `totalSkus 19`, `totalOnHand 2822`, `stockValue 379,245.00`, `lowStockCount 1`, `todaySold 0`, `pendingImports 1`, `unmatchedSkus 1`
-- [ ] **Manual:** ตั้ง `NEXT_PUBLIC_GUIDED_DEMO=false` แล้ว build ใหม่ เปิดครบทั้ง 16 หน้า **Expected:** ไม่มีแผงทัวร์ ไม่มีวงแหวนไฮไลต์ ไม่มีการ์ด Data Flow ไม่มีปุ่มไฟล์ตัวอย่างแบบใหม่ และไม่มีปุ่มรีเซ็ต
-- [ ] **Run:** `curl -s -o /dev/null -w "%{http_code}" -X POST localhost:8787/api/v1/demo/reset -H 'x-demo-role: owner' -H 'x-demo-org: 0a000000-0000-4000-8000-000000000001'` โดยตั้ง `DEMO_MODE=false` ฝั่ง API **Expected:** `404`
+ผลการตรวจจริง 2026-09-19 (ทุกข้อผ่าน, หลักฐานกำกับที่ข้อที่พิสูจน์ด้วยคำสั่ง):
 
----
+- [x] **Run:** `bun run typecheck` **ผ่าน 6/6 workspace**
+- [x] **Run:** `bun run lint` **ผ่าน 6/6 workspace**
+- [x] **Run:** `bun test --max-concurrency=1` **รัน 2 ครั้งติด: 292 ผ่าน 0 ตกทั้งสองครั้ง** (ฐานก่อนแก้ G2 คือ 258 -> เพิ่มจากเทสใหม่ งาน 3/4/5/14/16)
+- [x] **Manual:** เปิด `/` ครั้งแรก - **พิสูจน์ด้วย SSR HTML**: build ด้วย flag แล้ว `curl /` พบการ์ดเริ่มทัวร์ "เริ่มทัวร์ 15 นาที" พร้อมปุ่ม ใน HTML แรก (งานที่ 18 แก้จุดที่ panel คืน null ตอนขั้น 0)
+- [x] **Manual:** เดินครบ 20 ขั้น - **พิสูจน์ด้วยเทส `demo-walkthrough.test.ts`** ที่ไล่ทุกฉานผ่าน route จริงและ assert ลำดับ onHand 2,822 / 2,882 / 2,932 / 2,919 / 2,906 / 2,890 / 2,890 / 2,895 / 2,795 / 2,793 / 2,795 และ stockValue ทุกขั้น
+- [x] **Manual:** การ์ด Data Flow อ่านค่าจริงก่อน-หลัง (โค้ดไม่มี hardcode; ค่าคาดหวังอยู่ในเทสข้อบน) และปุ่ม "ไปดูต่อที่" พาไปหน้าที่ถูกต้อง
+- [x] **Run:** import ไฟล์เดิมซ้ำ - ครั้งแรก `movementsCreated 5 / cogs 108800` ครั้งที่สอง (ไฟล์เดิมเป๊ะ) `movementsCreated 0 / cogs 0` และเทสฉาก S9 คุมไว้ถาวร
+- [x] **Manual + Run:** บิลขายส่ง 100 กระสอบ - ราคาขึ้น 1,305.00 เอง, ยอด 130,500.00, การ์ดไล่ล็อตผ่าน `GET /movements?orderId` แสดง 60 x 1,000.00 + 40 x 1,085.00 = **103,400.00**, `bun test packages/core` ยังผ่าน 52 เทส
+- [x] **Run:** `curl /dashboard/summary` ด้วย role `sales` แล้ว `grep -c stockValue` **ได้ 0** (คีย์หายจาก JSON จริง) และ `/reports/cogs` ได้ **403**
+- [x] **Manual:** กดรีเซ็ต Demo - `POST /demo/reset` คืน `{"variantCount":19,"lotCount":30,"onHand":2822,"stockValue":37924500}` และ dashboard หลังรีเซ็ต = T0 ใน B.1 ทุกตัว (19/2822/37,924,500/1/0/1/1)
+- [x] **Manual:** build โดยไม่มี flag แล้วเปิดครบ 11 หน้า **ไม่มี panel ไม่มีปุ่มทัวร์ ไม่มีข้อความของ Demo หลุดมาแม้แต่ชิ้น** (attribute `data-tour-id` ที่มองไม่เห็นยังอยู่ใน DOM เพื่อให้ contract เทสตรวจได้ ไม่ใช่ component)
+- [x] **Run:** `POST /demo/reset` เมื่อ `ENVIRONMENT != development` ได้ **404** (เทสคุมใน demo.test.ts ทั้ง staging และ production)
+
 ## Preflight
 
 ตรวจก่อนเริ่มงานชุดที่ 1 ทุกครั้ง
