@@ -1,17 +1,21 @@
 /**
- * Channels = the 6 online stores + the physical shop, all sharing one stock pool.
+ * GET /channels - the sales channels behind the one stock pool.
+ *
+ * Reads the seeded channels from the database. This used to return
+ * MOCK_CHANNELS, whose string ids ("ch_shopee_main") are not seed uuids - the
+ * import picker filled its dropdown from here, so picking one and uploading
+ * failed with not_found. The guided demo uploads real files through this list.
  */
 
 import { Hono } from 'hono';
-import { MOCK_CHANNELS } from '../lib/mock-data';
 import { ok } from '../lib/response';
 import { requirePermission } from '../middleware/require-permission';
+import { listChannelSummaries } from '../services/channel-service';
+import { serviceContext } from '../services/context';
 import type { AppEnv } from '../types/app';
-import type { Channel } from '../types/contract';
 
-export const channelsRouter = new Hono<AppEnv>().get('/', requirePermission('stock:read'), (c) => {
-  // MOCK: replace with `SELECT * FROM channels WHERE org_id = $orgId ORDER BY kind, name`
-  // plus MAX(import_batches.applied_at) per channel for lastImportedAt.
-  const channels: Channel[] = MOCK_CHANNELS;
-  return ok(c, channels);
-});
+export const channelsRouter = new Hono<AppEnv>().get(
+  '/',
+  requirePermission('stock:read'),
+  async (c) => ok(c, await listChannelSummaries(serviceContext(c))),
+);
