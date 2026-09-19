@@ -203,6 +203,7 @@ Never print or commit `PG_URL`; it stays a shell value.
 
 - [Podman machine and the Postgres container are up] - Check: `podman ps --format '{{.Names}} {{.Status}}' | grep stockhub-postgres && pg_isready -h localhost -p 5435` - Needed by: Tasks L1, L3, L4, L5, L6 and end-to-end. If down: `podman machine start && podman start stockhub-postgres`.
 - [`.env` carries a local DATABASE_URL] - Check: `grep -c '^DATABASE_URL=postgresql://localhost:5435/' .env` prints `1` (shape check only, never print the value) - Needed by: everything above.
+  > Deviation: the grep prints `0` because the real URL carries credentials before the host (`postgresql://***@localhost:5435/stockhub`, masked). The substance holds - exactly one `DATABASE_URL` line, host `localhost:5435`, db `stockhub` - and `db:migrate` + `db:seed` ran green against it. Re-verified 2026-09-19 at the start of this run.
 - [The shared `stockhub` database is migrated and freshly seeded] - Check: `DATABASE_URL="$PG_URL" bun run db:migrate && DATABASE_URL="$PG_URL" bun run db:seed` ends with "Seed complete"; measured output: 30 lots, 2822 units, stock value 379,245 baht, 4 orders / 7 lines - Needed by: all DB verifies. Re-seed also between experiments; the seed is idempotent (TRUNCATE list in `packages/db/src/seed/index.ts:54-72`).
 - [Baseline counts at `83d899a`, before Task L0] - Check: `bun run typecheck` (all 6 packages exit 0, measured), `bun run lint` (all green, measured), `bun test` (measured NON-DETERMINISTIC: 264-266 pass with 2-4 fail - the failing tests are `guards.integration.test.ts` "keeps the seed invariant", `routes/inventory.test.ts` "movements list returns the seed ledger", `routes/inventory-write.test.ts` "manager receives 5 pairs", `repositories/inventory-repo.integration.test.ts` "hoe history shows the running balance"; all four are DB suites racing the mutating import suite) - Needed by: Task L0's verify. After Task L0: `bun run test` prints `268 pass, 0 fail` deterministically (measured twice with `--max-concurrency=1`).
 - [Dependencies installed in THIS checkout] - Check: `test -d node_modules && bun run typecheck` exits 0 - Needed by: every task.
@@ -235,13 +236,13 @@ Never print or commit `PG_URL`; it stays a shell value.
 **Gotcha:** the four baseline-failing tests are NOT broken by this plan and must not be "fixed" here. They fail because bun executes test files concurrently (default `--max-concurrency=20`) and the import suites mutate the shared ledger while the seed-absolute suites read it. Measured evidence: after a fresh `db:seed` the invariant query returns 0 broken rows; `bun test packages/db/src/guards.integration.test.ts` alone right after a full suite fails; `bun test --max-concurrency=1` prints 268 pass / 0 fail.
 
 **Steps:**
-- [ ] Step 1: Change the root script to
+- [x] Step 1: Change the root script to
       ```json
       "test": "bun test --max-concurrency=1",
       ```
       and add one `//`-style reason where the script block allows a comment line above it in the scripts object (JSON has no comments - instead, if `package.json` has no place for the why, note it in the commit body: "DB-backed suites share one Postgres; serialized files keep the seed-absolute assertions deterministic").
-- [ ] Step 2: Verify - Run: `bun run test` twice in a row - Expected: both runs print `268 pass` / `0 fail` (with `DATABASE_URL` unset they print fewer passes and `0 fail` because DB suites skip; run with `.env` present, which `bun test` loads by itself).
-- [ ] Step 3: Commit - `git commit -m "Serialize bun test files for deterministic DB suites"`
+- [x] Step 2: Verify - Run: `bun run test` twice in a row - Expected: both runs print `268 pass` / `0 fail` (with `DATABASE_URL` unset they print fewer passes and `0 fail` because DB suites skip; run with `.env` present, which `bun test` loads by itself).
+- [x] Step 3: Commit - `git commit -m "Serialize bun test files for deterministic DB suites"`
 
 #### Task L1: Fee source enum, order fee columns, channel rate, migration
 
@@ -653,3 +654,4 @@ Run on the merged branch with the shared database freshly seeded, `wrangler dev 
 
 - 2026-09-19, round 1 (`/skill:scrutinize` via a fresh subagent, no planning context): verdict FIX FIRST with 1 blocker and 5 majors. All applied: the fixture-date window vs report window (E2E split into a fixture-window step and a today step), the fee wire mapping moved into `toWireOrder`, the return-sign inversion in the L5 fixture (positive `qty_delta` plus explicit formulas), the `.extend` on a refined zod schema (object restated), the flat client naming (`getProfitReport` / `setOrderFee` / `getChannels`), and the migration count (three at base, L1 generates 0003). Five nits applied: leak-scan wording, two CHECK constraints, six marketplace channels, three citation line fixes, and the D3 re-import wrinkle. Round 2 reviewer dispatched after these fixes.
 - 2026-09-19, round 2 (fresh subagent, `/skill:scrutinize`): verdict SHIP - all six round-1 fixes verified against the tree, independent pass found no blocker and no major. Four nits applied: `mockApi.profitReport` flat sibling name, the fixture date span corrected to createTime 2026-02-14..15 with a do-not-tighten warning, the db-side row type renamed `ProfitLedgerRow` to avoid colliding with the wire type, and the E2E fee expectation restated as integer round-half-up. Plan ready to execute.
+      > Deviation: first four verify attempts failed with 8-10 seed-absolute failures - a concurrent executor session in `~/.treehouse/stockhub-demo-ec2393` was looping `lint` + `db:seed` + `bun test` against the same shared Postgres, and its TRUNCATE-on-seed corrupted in-flight runs. Waited for its processes to stop, re-seeded, and both back-to-back runs then printed `268 pass` / `0 fail`. Later DB-backed verifies must check for a foreign `bun test` process before trusting a failure.
