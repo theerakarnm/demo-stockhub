@@ -10,7 +10,7 @@
 import { Button } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import { formatBytes } from '@/lib/format';
-import { FileSpreadsheet, Sparkles, UploadCloud, X } from 'lucide-react';
+import { FileSpreadsheet, UploadCloud, X } from 'lucide-react';
 import { useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
 
@@ -21,18 +21,10 @@ export interface ImportDropzoneProps {
   file: File | null;
   onPick: (file: File) => void;
   onClear: () => void;
-  /** Demo-only shortcut, see the note rendered next to the button. */
-  onUseSample: () => void;
   disabled?: boolean;
 }
 
-export function ImportDropzone({
-  file,
-  onPick,
-  onClear,
-  onUseSample,
-  disabled = false,
-}: ImportDropzoneProps) {
+export function ImportDropzone({ file, onPick, onClear, disabled = false }: ImportDropzoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
 
@@ -114,16 +106,8 @@ export function ImportDropzone({
           <Button variant="outline" size="sm" onClick={() => inputRef.current?.click()}>
             เลือกไฟล์จากเครื่อง
           </Button>
-          {/* Demo only: this button disappears once mock mode is turned off. */}
-          <Button variant="ghost" size="sm" onClick={onUseSample}>
-            <Sparkles className="size-3.5" aria-hidden />
-            ใช้ไฟล์ตัวอย่าง
-          </Button>
         </div>
       </div>
-      <p className="mt-2 text-xs text-slate-500">
-        ไฟล์ตัวอย่างเป็นไฟล์เดโมของ Shopee ไว้ให้ลองดูขั้นตอนทั้งหมดโดยไม่ต้องหาไฟล์จริง
-      </p>
     </div>
   );
 }

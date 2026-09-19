@@ -13,11 +13,11 @@ import { ImportDropzone } from '@/components/imports/import-dropzone';
 import { ImportPreview } from '@/components/imports/import-preview';
 import { ImportStepper, StepPanel } from '@/components/imports/import-stepper';
 import type { ImportStep } from '@/components/imports/import-stepper';
+import { SampleFileButtons } from '@/components/imports/sample-file-button';
 import { useRole } from '@/components/role-provider';
 import { Button, CardSkeleton, ErrorState, PageHeader, Select } from '@/components/ui';
 import { api } from '@/lib/api-client';
 import type { ImportBatch } from '@/lib/api-types';
-import { buildSampleImportFile } from '@/lib/mock-data';
 import { useApi, useMutation } from '@/lib/use-api';
 import { IMPORTABLE_CHANNEL_KINDS } from '@stockhub/core';
 import { AlertTriangle, ArrowLeft, RotateCcw, ScanSearch } from 'lucide-react';
@@ -133,12 +133,19 @@ export default function NewImportPage() {
               upload.reset();
             }}
             onClear={handleReset}
-            onUseSample={() => {
-              // Demo only: builds a real File in the browser from a fixture CSV.
-              setFile(buildSampleImportFile());
+            disabled={upload.pending || batch !== null}
+          />
+
+          <SampleFileButtons
+            disabled={upload.pending || batch !== null}
+            onPick={(picked, pinnedChannelId) => {
+              // The channel is pinned: getChannelByKind resolves limit(1)
+              // without an order, so the walkthrough cannot rely on detection
+              // with two live channels per marketplace in the seed.
+              setChannelId(pinnedChannelId);
+              setFile(picked);
               upload.reset();
             }}
-            disabled={upload.pending || batch !== null}
           />
 
           {upload.error ? (
