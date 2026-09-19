@@ -436,7 +436,8 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
 - [x] Step 5: Contract edit (Order fields above) in the same commit as its COST_KEYS registration: add `'fee'`, `'platformFee'` and `'feeSource'` to the `COST_KEYS` set literal in `packages/core/src/rbac.ts` (anchor: the `'grossProfit'` line inside `COST_KEYS`, ~L110). Both new fields carry the marker, so the reverse audit stays green in this commit and Task L6 only reuses keys that are already registered. Expected: contract audit 3 tests pass in this task's verify.
 - [x] Step 6: Tests in `orders.test.ts`: manager PATCHes `{ fee: 3500 }` on a bill -> 200, response carries `platformFee 3500`, `feeSource 'manual'`; sales PATCHes -> 403 (no `cost:write`); owner GET -> `platformFee` present; sales GET -> neither `platformFee` nor `feeSource` in the JSON.
 - [x] Step 7: Verify - Run: `DATABASE_URL="$PG_URL" bun test apps/api/src/routes/orders.test.ts apps/api/src/contract-audit.test.ts && bun run --filter @stockhub/api typecheck && bun run --filter @stockhub/api lint && bun run --filter @stockhub/core typecheck` - Expected: new tests pass, contract audit 3 pass, 0 fail anywhere; all typechecks exit 0.
-- [ ] Step 8: Commit - `git commit -m "Add manual platform fee override"`
+- [x] Step 8: Commit - `git commit -m "Add manual platform fee override"`
+  > Orchestrator note: ticked by the reviewing orchestrator - commit `5fb3296` verified on the branch (the executor missed the box, the commit itself landed and was verified: subject, staged files incl. the plan, tree clean).
 
 #### Task L5: Profit read model in the movement repo
 
@@ -463,7 +464,7 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
 **Gotcha:** copied verbatim from the `listCogsByDayChannel` header comment - inside subqueries, bare `order_id` correlates to the inner table, so every outer reference stays table-qualified. Sum columns of `bigint` come back as strings; map with `Number()` like `listCogsByDayChannel` does. Cap the query with `limit 10_000` as a runaway guard; L6's schema bounds the window to 366 days so the cap is unreachable in practice.
 
 **Steps:**
-- [ ] Step 1: Implement with one select: `orders o` inner-join a `sale_out` aggregate subquery, left-join a restore aggregate subquery, inner-join `channels` for name/kind, `where(and(eq(orders.orgId, ...), gte(orders.orderedAt, from), lt(orders.orderedAt, to), channelId ? eq(...) : undefined))`, `orderBy(desc(orders.orderedAt), asc(orders.id))`, `limit(10_000)`.
+- [x] Step 1: Implement with one select: `orders o` inner-join a `sale_out` aggregate subquery, left-join a restore aggregate subquery, inner-join `channels` for name/kind, `where(and(eq(orders.orgId, ...), gte(orders.orderedAt, from), lt(orders.orderedAt, to), channelId ? eq(...) : undefined))`, `orderBy(desc(orders.orderedAt), asc(orders.id))`, `limit(10_000)`.
       ```ts
       const saleAgg = db.$with('') // not needed - use raw sql subqueries per the listCogsByDayChannel style
       ```
@@ -473,9 +474,14 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
         where m2.order_id = ${orders.id} and m2.reason = 'sale_out'), 0)::int`.as('sold_cost'),
       ```
       and the same shape for `unitsSold` (`sum(-m2.qty_delta)` over `sale_out`) and for `restoredUnits` (`sum(m2.qty_delta)`, NO minus sign - restores are inbound) and `restoredCost` (`sum(m2.cost_total)`) over `reason in ('return_in','cancel_restore')`. Simpler and index-friendlier alternative that stays within the file's conventions: explicit `sql` subselects per column group as above - do NOT introduce a `with()` CTE style the file has never used.
-- [ ] Step 2: Integration test, all inside `inRollback`: insert one order (fixed uuid, `channelId` shopeeMain, `grandTotal` 50500, `platformFee` 7070, `feeSource` 'channel_default', `status` 'delivered', `orderedAt` now) plus one `sale_out` movement (qtyDelta -3, costTotal 24000) and one `return_in` movement (qtyDelta +1, costTotal 8000 - restores are inbound, positive) for the same order; assert the row comes back with `unitsSold 3`, `soldCost 24000`, `restoredUnits 1`, `restoredCost 8000`; a second order without movements must NOT appear; the `channelId` filter must drop the row when set to `pos`.
-- [ ] Step 3: Verify - Run: `DATABASE_URL="$PG_URL" bun test packages/db/src/repositories/movement-repo.integration.test.ts && bun run --filter @stockhub/db typecheck` - Expected: 3 pass, 0 fail; typecheck exit 0; the rollback left the seed untouched (`bun test packages/db/src/guards.integration.test.ts` still passes).
-- [ ] Step 4: Commit - `git commit -m "Add per-order profit read model"`
+      > Deviation: the sale_out filter required by the row semantics ("only orders with at
+      > least one `sale_out` movement") is implemented as an `exists (select 1 from
+      > stock_movements m1 where m1.order_id = ${orders.id} and m1.reason = 'sale_out')`
+      > condition inside the `and(...)` where list, keeping the raw-`sql` style; the step's
+      > where sketch did not list it.
+- [x] Step 2: Integration test, all inside `inRollback`: insert one order (fixed uuid, `channelId` shopeeMain, `grandTotal` 50500, `platformFee` 7070, `feeSource` 'channel_default', `status` 'delivered', `orderedAt` now) plus one `sale_out` movement (qtyDelta -3, costTotal 24000) and one `return_in` movement (qtyDelta +1, costTotal 8000 - restores are inbound, positive) for the same order; assert the row comes back with `unitsSold 3`, `soldCost 24000`, `restoredUnits 1`, `restoredCost 8000`; a second order without movements must NOT appear; the `channelId` filter must drop the row when set to `pos`.
+- [x] Step 3: Verify - Run: `DATABASE_URL="$PG_URL" bun test packages/db/src/repositories/movement-repo.integration.test.ts && bun run --filter @stockhub/db typecheck` - Expected: 3 pass, 0 fail; typecheck exit 0; the rollback left the seed untouched (`bun test packages/db/src/guards.integration.test.ts` still passes).
+- [x] Step 4: Commit - `git commit -m "Add per-order profit read model"`
 
 #### Task L6: Serve GET /reports/profit
 
