@@ -13,6 +13,13 @@ export * from './repositories';
 /** Seeded demo identity. Data only, no side effects, safe to import from apps. */
 export { SEED_IDS } from './seed/data';
 
+/**
+ * The seed write, for the demo reset endpoint. Takes a `DbExecutor`, so it runs
+ * on a Worker connection as happily as on the CLI one. Destructive: the caller
+ * owns the guard rail that decides it is allowed to run.
+ */
+export { seedDatabase, SEED_SUMMARY, type SeedSummary } from './seed/seed-data';
+
 /** Tables, enums and relations, namespaced to keep the top level readable. */
 export * as schema from './schema';
 
