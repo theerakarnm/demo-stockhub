@@ -600,7 +600,8 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
 - [x] Step 4: `api-profit.test.ts` (pure): totals equal the summed rows; the fully returned order contributes all zeros; the channel filter drops other channels; `setOrderFee` echoes `feeSource 'manual'`.
 - [x] Step 5: Verify - Run: `bun test apps/web/src/lib/api-profit.test.ts && bun run --filter @stockhub/web typecheck && bun run --filter @stockhub/web lint` - Expected: 4 pass, 0 fail; typecheck and lint exit 0.
   > Ran 2026-09-19: `4 pass, 0 fail, 25 expect() calls`; `@stockhub/web typecheck: Exited with code 0`; `@stockhub/web lint: Exited with code 0`.
-- [ ] Step 6: Commit - `git commit -m "Add web profit report and fee client"`
+- [x] Step 6: Commit - `git commit -m "Add web profit report and fee client"`
+  > Orchestrator note: ticked by the reviewing orchestrator - commit `72ade43` verified on the branch (executor missed the box; commit subject, staged plan file and tree state all verified).
 
 #### Task L8: /reports/profit screen + sidebar entry
 
@@ -614,8 +615,8 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
 **Gotcha:** the existing `/reports/cogs` entry carries `match: ['/reports']`, so once a second item lives under `/reports` both entries would highlight together. Narrow the cogs entry to `match: ['/reports/cogs']` in the same commit and give the new entry `match: ['/reports/profit']`.
 
 **Steps:**
-- [ ] Step 1: Page structure, mirroring the COGS page: gate on `hasPermission('cost:read')` and render the locked note instead of fetching when absent; from/to date inputs defaulting to the last 30 days (`defaultRange()` pattern); optional channel `Select` fed by `api.getChannels()`; per-channel section as `StatCard`s or a compact table (orders, revenue, fee, cogs, profit, all money through `<CostValue>`); per-order table (date, external id, channel badge, status badge, units, revenue, fee, cogs, profit) with `<CostValue>` on fee/cogs/profit; a totals footer row; loading `TableSkeleton`, `EmptyState` ("ยังไม่มีออเดอร์ที่ตัดสต็อกในช่วงนี้"), `ErrorState` with retry; a small footnote "ค่าธรรมเนียมเป็นค่าที่ตั้งไว้ต่อช่องทาง แก้ได้ที่หน้าออเดอร์" explaining fee provenance.
-- [ ] Step 2: Sidebar: insert after the cogs entry
+- [x] Step 1: Page structure, mirroring the COGS page: gate on `hasPermission('cost:read')` and render the locked note instead of fetching when absent; from/to date inputs defaulting to the last 30 days (`defaultRange()` pattern); optional channel `Select` fed by `api.getChannels()`; per-channel section as `StatCard`s or a compact table (orders, revenue, fee, cogs, profit, all money through `<CostValue>`); per-order table (date, external id, channel badge, status badge, units, revenue, fee, cogs, profit) with `<CostValue>` on fee/cogs/profit; a totals footer row; loading `TableSkeleton`, `EmptyState` ("ยังไม่มีออเดอร์ที่ตัดสต็อกในช่วงนี้"), `ErrorState` with retry; a small footnote "ค่าธรรมเนียมเป็นค่าที่ตั้งไว้ต่อช่องทาง แก้ได้ที่หน้าออเดอร์" explaining fee provenance.
+- [x] Step 2: Sidebar: insert after the cogs entry
       ```ts
       {
         href: '/reports/profit',
@@ -626,8 +627,9 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
       },
       ```
       and change the cogs entry's `match` to `['/reports/cogs']`.
-- [ ] Step 3: Verify - Run: `bun run --filter @stockhub/web typecheck && bun run --filter @stockhub/web lint && grep -c "MOCK" apps/web/src/app/reports/profit/page.tsx` - Expected: typecheck and lint exit 0; grep prints 0 (the page never imports mock data directly).
-- [ ] Step 4: Commit - `git commit -m "Add profit report screen"`
+- [x] Step 3: Verify - Run: `bun run --filter @stockhub/web typecheck && bun run --filter @stockhub/web lint && grep -c "MOCK" apps/web/src/app/reports/profit/page.tsx` - Expected: typecheck and lint exit 0; grep prints 0 (the page never imports mock data directly).
+  > Ran 2026-09-19: typecheck `Exited with code 0`; lint `Exited with code 0`; grep printed `0` (grep then exits 1 on zero matches, so the chain stops there - no MOCK string exists in the page).
+- [x] Step 4: Commit - `git commit -m "Add profit report screen"`
 
 #### Task L9: Fee override control on the order detail page
 

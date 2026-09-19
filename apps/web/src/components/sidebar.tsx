@@ -25,6 +25,7 @@ import {
   Settings,
   ShoppingCart,
   Tags,
+  TrendingUp,
   Users,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -60,7 +61,14 @@ const NAV_ITEMS: NavItem[] = [
     label: 'รายงานต้นทุน',
     icon: BarChart3,
     permission: 'cost:read',
-    match: ['/reports'],
+    match: ['/reports/cogs'],
+  },
+  {
+    href: '/reports/profit',
+    label: 'รายงานกำไร',
+    icon: TrendingUp,
+    permission: 'cost:read',
+    match: ['/reports/profit'],
   },
   { href: '/settings/channels', label: 'ตั้งค่าช่องทางขาย', icon: Settings, match: ['/settings'] },
 ];
