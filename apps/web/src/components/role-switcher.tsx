@@ -43,6 +43,7 @@ export function RoleSwitcher() {
     <div className="relative">
       <button
         type="button"
+        data-tour-id="role-switcher"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
         aria-controls={PANEL_ID}

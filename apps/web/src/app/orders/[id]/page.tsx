@@ -307,6 +307,7 @@ export default function OrderDetailPage() {
             {data ? (
               <Link
                 href={`/orders/${data.id}/print`}
+                data-tour-id="print-button"
                 className={buttonClass('outline', 'md')}
                 title="เปิดหน้าพิมพ์บิล (บันทึกเป็น PDF ได้จากเบราว์เซอร์)"
               >
@@ -316,7 +317,12 @@ export default function OrderDetailPage() {
             ) : null}
             <PermissionGate permission="order:create">
               {canCancel ? (
-                <Button variant="outline" loading={busy} onClick={() => setCancelOpen(true)}>
+                <Button
+                  variant="outline"
+                  data-tour-id="cancel-order-button"
+                  loading={busy}
+                  onClick={() => setCancelOpen(true)}
+                >
                   <Ban className="size-4" aria-hidden />
                   ยกเลิกบิล
                 </Button>

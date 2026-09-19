@@ -175,11 +175,13 @@ function BillingForm() {
               <ChannelKindToggle value={channelKind} onChange={setChannelKind} />
               <div>
                 <p className="mb-1 block text-xs font-medium text-slate-600">ลูกค้าประจำ</p>
-                <CustomerPicker
-                  customer={customer}
-                  onPick={setCustomer}
-                  onClear={() => setCustomer(null)}
-                />
+                <div data-tour-id="order-customer-select">
+                  <CustomerPicker
+                    customer={customer}
+                    onPick={setCustomer}
+                    onClear={() => setCustomer(null)}
+                  />
+                </div>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <Input
@@ -232,15 +234,17 @@ function BillingForm() {
         </div>
 
         <div className="lg:col-span-1">
-          <OrderSummaryCard
-            lineCount={lines.length}
-            unitCount={unitCount}
-            total={total}
-            pending={createOrder.pending}
-            canSubmit={canSubmit && !createOrder.pending}
-            onSubmit={submit}
-            error={createOrder.error}
-          />
+          <div data-tour-id="order-submit">
+            <OrderSummaryCard
+              lineCount={lines.length}
+              unitCount={unitCount}
+              total={total}
+              pending={createOrder.pending}
+              canSubmit={canSubmit && !createOrder.pending}
+              onSubmit={submit}
+              error={createOrder.error}
+            />
+          </div>
         </div>
       </div>
     </>

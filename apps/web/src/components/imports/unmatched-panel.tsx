@@ -25,7 +25,10 @@ export function UnmatchedPanel({ items, pendingSku, onMatch }: UnmatchedPanelPro
   const [picked, setPicked] = useState<Record<string, string>>({});
 
   return (
-    <section className="rounded-xl border border-rose-200 bg-rose-50/60 shadow-sm">
+    <section
+      data-tour-id="unmatched-panel"
+      className="rounded-xl border border-rose-200 bg-rose-50/60 shadow-sm"
+    >
       <div className="flex items-start gap-3 border-b border-rose-200 px-4 py-3">
         <AlertTriangle className="mt-0.5 size-5 shrink-0 text-rose-600" aria-hidden />
         <div>

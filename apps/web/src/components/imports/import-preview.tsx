@@ -351,6 +351,7 @@ export function ImportPreview({ detail, onReload }: ImportPreviewProps) {
             <span title={disabledReason}>
               <Button
                 size="lg"
+                data-tour-id="apply-button"
                 loading={apply.pending}
                 disabled={blocked || !canRun}
                 onClick={() => setConfirmOpen(true)}

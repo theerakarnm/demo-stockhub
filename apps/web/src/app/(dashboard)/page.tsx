@@ -123,6 +123,7 @@ export default function DashboardPage() {
               icon={<ShoppingCart className="size-4" aria-hidden />}
             />
             <StatTile
+              data-tour-id="dashboard-lowstock-card"
               label="สินค้าใกล้หมด"
               value={qty(data.lowStockCount)}
               hint="ต่ำกว่าจุดสั่งซื้อที่ตั้งไว้"

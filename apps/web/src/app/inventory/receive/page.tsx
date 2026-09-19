@@ -47,7 +47,9 @@ export default function ReceivePage() {
           </Link>
         }
       />
-      <ReceiveForm />
+      <div data-tour-id="receive-submit">
+        <ReceiveForm />
+      </div>
     </>
   );
 }
