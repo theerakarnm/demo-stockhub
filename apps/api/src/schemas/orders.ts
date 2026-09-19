@@ -37,6 +37,14 @@ export type CreateOrderBody = z.infer<typeof createOrderBody>;
 
 export const orderParam = z.object({ id: idString });
 
+/** Manual platform fee for one order, in satang. The cap is a sanity rail at
+ * 10 million baht, not a business rule; the platform fee never floats. */
+export const setOrderFeeBody = z.object({
+  fee: z.number().int().nonnegative().max(1_000_000_000),
+});
+
+export type SetOrderFeeBody = z.infer<typeof setOrderFeeBody>;
+
 /** Why a bill is being cancelled; stored as the note on the cancel_restore rows. */
 export const cancelOrderBody = z.object({
   reason: z.string().trim().min(3).max(280),

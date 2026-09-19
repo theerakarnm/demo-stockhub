@@ -9,6 +9,7 @@
 
 import type {
   ChannelKind,
+  FeeSource,
   ImportStatus,
   MatchSource,
   MovementReason,
@@ -202,6 +203,10 @@ export interface Order {
   cogs?: MoneyOnWire;
   /** cost field */
   margin?: MoneyOnWire;
+  /** cost field */
+  platformFee?: MoneyOnWire;
+  /** cost field */
+  feeSource?: FeeSource;
   orderedAt: string;
   lines: OrderLine[];
 }

@@ -107,6 +107,10 @@ export const COST_KEYS: ReadonlySet<string> = new Set([
   // Report totals already named in apps/web/src/lib/api-types.ts
   'grossProfit',
   'totalCogs',
+  // The platform fee an order pays, its provenance, and any nested fee object
+  'fee',
+  'platformFee',
+  'feeSource',
 ]);
 
 /**

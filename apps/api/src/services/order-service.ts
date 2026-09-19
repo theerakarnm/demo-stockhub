@@ -122,6 +122,10 @@ const toWireOrder = (
   // Tier evidence for the bill; stripped for roles without price_tier:read.
   priceTierId: order.priceTierId ?? undefined,
   grandTotal: order.grandTotal,
+  // Fee provenance rides along from the row itself, so create, get and the
+  // list mapper all carry it; stripCost() removes it per role.
+  platformFee: order.platformFee,
+  feeSource: order.feeSource,
   orderedAt: order.orderedAt.toISOString(),
   lines: [...lines],
   ...(cost.cogs === undefined ? {} : { cogs: cost.cogs }),
@@ -510,6 +514,23 @@ const outstandingSales = (
     }
   }
   return { outstanding, slicesByVariant };
+};
+
+/**
+ * Write the fee a person typed onto one order, always with source 'manual',
+ * then return the fresh order so the caller sees cogs / margin / platformFee
+ * together. The write is one transaction; the read-back reuses getOrder so the
+ * response carries the same cost numbers a GET does.
+ */
+export const setOrderFee = async (
+  ctx: ServiceContext,
+  orderId: OrderId,
+  fee: Satang,
+): Promise<Order> => {
+  await ctx.db().transaction(async (tx) => {
+    await orderRepo.setOrderFee(tx, { orgId: ctx.auth.orgId, orderId, fee, source: 'manual' });
+  });
+  return getOrder(ctx, orderId);
 };
 
 /**

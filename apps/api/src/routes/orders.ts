@@ -7,6 +7,7 @@
  *                     creates itself - marketplace orders arrive via /imports)
  *   POST /:id/cancel  reverse a bill: the exact FIFO slices of the sale go back
  *   POST /:id/return  accept a full or partial customer return
+ *   PATCH /:id/fee    set the platform fee of one bill by hand (cost:write)
  *
  * Reading an order needs `order:read`; writing one needs `order:create`, the
  * same permission the till already holds. Cost fields (cogs, margin, line
@@ -14,7 +15,7 @@
  * shop floor sees the bill but not the margin.
  */
 
-import { asOrderId } from '@stockhub/core';
+import { asOrderId, satang } from '@stockhub/core';
 import { Hono } from 'hono';
 import { ok, paginated } from '../lib/response';
 import { validate } from '../lib/validate';
@@ -25,6 +26,7 @@ import {
   listOrdersQuery,
   orderParam,
   returnOrderBody,
+  setOrderFeeBody,
 } from '../schemas/orders';
 import { serviceContext } from '../services/context';
 import {
@@ -33,6 +35,7 @@ import {
   getOrder,
   listOrders,
   returnOrder,
+  setOrderFee,
 } from '../services/order-service';
 import type { AppEnv } from '../types/app';
 
@@ -78,4 +81,22 @@ export const ordersRouter = new Hono<AppEnv>()
       const movements = await returnOrder(serviceContext(c), asOrderId(id), lines);
       return ok(c, movements);
     },
+  )
+
+  .patch(
+    '/:id/fee',
+    // The fee is money the shop pays, so writing it needs cost:write, the same
+    // permission that guards editing costs elsewhere.
+    requirePermission('cost:write'),
+    validate('param', orderParam),
+    validate('json', setOrderFeeBody),
+    async (c) =>
+      ok(
+        c,
+        await setOrderFee(
+          serviceContext(c),
+          asOrderId(c.req.valid('param').id),
+          satang(c.req.valid('json').fee),
+        ),
+      ),
   );

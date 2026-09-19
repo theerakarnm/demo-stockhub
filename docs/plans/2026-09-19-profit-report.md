@@ -416,13 +416,13 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
       to the object literal next to `grandTotal`. The new fields flow through `redactMiddleware` automatically because Task L4 puts their keys in `COST_KEYS` - the route test asserts the sales-side absence to prove it. (2) `FeeSource` reaches `contract.ts` as `import type { FeeSource } from '@stockhub/core'` - the types file already re-exports core types this way. (3) The zod body must bound the value: `z.object({ fee: z.number().int().nonnegative().max(1_000_000_000) })` (satang; the cap is a sanity rail at 10 million baht, not a business rule).
 
 **Steps:**
-- [ ] Step 1: Repo `setOrderFee` mirroring `setOrderStatus`: select the row `for('update')`, throw `not_found` when missing, then
+- [x] Step 1: Repo `setOrderFee` mirroring `setOrderStatus`: select the row `for('update')`, throw `not_found` when missing, then
       ```ts
       await exec.update(orders).set({ platformFee: params.fee, feeSource: params.source, updatedAt: new Date() }).where(and(eq(orders.orgId, params.orgId), eq(orders.id, params.orderId)));
       ```
-- [ ] Step 2: Schema `setOrderFeeBody` in `apps/api/src/schemas/orders.ts`.
-- [ ] Step 3: Service `setOrderFee`: transaction -> repo with `source: 'manual'` -> return `getOrder(ctx, orderId)` so the caller sees fresh `cogs` / `margin` / `platformFee` together.
-- [ ] Step 4: Route
+- [x] Step 2: Schema `setOrderFeeBody` in `apps/api/src/schemas/orders.ts`.
+- [x] Step 3: Service `setOrderFee`: transaction -> repo with `source: 'manual'` -> return `getOrder(ctx, orderId)` so the caller sees fresh `cogs` / `margin` / `platformFee` together.
+- [x] Step 4: Route
       ```ts
       .patch(
         '/:id/fee',
@@ -433,9 +433,9 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
       )
       ```
       matching the mount style of the existing `.post` handlers.
-- [ ] Step 5: Contract edit (Order fields above) in the same commit as its COST_KEYS registration: add `'fee'`, `'platformFee'` and `'feeSource'` to the `COST_KEYS` set literal in `packages/core/src/rbac.ts` (anchor: the `'grossProfit'` line inside `COST_KEYS`, ~L110). Both new fields carry the marker, so the reverse audit stays green in this commit and Task L6 only reuses keys that are already registered. Expected: contract audit 3 tests pass in this task's verify.
-- [ ] Step 6: Tests in `orders.test.ts`: manager PATCHes `{ fee: 3500 }` on a bill -> 200, response carries `platformFee 3500`, `feeSource 'manual'`; sales PATCHes -> 403 (no `cost:write`); owner GET -> `platformFee` present; sales GET -> neither `platformFee` nor `feeSource` in the JSON.
-- [ ] Step 7: Verify - Run: `DATABASE_URL="$PG_URL" bun test apps/api/src/routes/orders.test.ts apps/api/src/contract-audit.test.ts && bun run --filter @stockhub/api typecheck && bun run --filter @stockhub/api lint && bun run --filter @stockhub/core typecheck` - Expected: new tests pass, contract audit 3 pass, 0 fail anywhere; all typechecks exit 0.
+- [x] Step 5: Contract edit (Order fields above) in the same commit as its COST_KEYS registration: add `'fee'`, `'platformFee'` and `'feeSource'` to the `COST_KEYS` set literal in `packages/core/src/rbac.ts` (anchor: the `'grossProfit'` line inside `COST_KEYS`, ~L110). Both new fields carry the marker, so the reverse audit stays green in this commit and Task L6 only reuses keys that are already registered. Expected: contract audit 3 tests pass in this task's verify.
+- [x] Step 6: Tests in `orders.test.ts`: manager PATCHes `{ fee: 3500 }` on a bill -> 200, response carries `platformFee 3500`, `feeSource 'manual'`; sales PATCHes -> 403 (no `cost:write`); owner GET -> `platformFee` present; sales GET -> neither `platformFee` nor `feeSource` in the JSON.
+- [x] Step 7: Verify - Run: `DATABASE_URL="$PG_URL" bun test apps/api/src/routes/orders.test.ts apps/api/src/contract-audit.test.ts && bun run --filter @stockhub/api typecheck && bun run --filter @stockhub/api lint && bun run --filter @stockhub/core typecheck` - Expected: new tests pass, contract audit 3 pass, 0 fail anywhere; all typechecks exit 0.
 - [ ] Step 8: Commit - `git commit -m "Add manual platform fee override"`
 
 #### Task L5: Profit read model in the movement repo

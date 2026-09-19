@@ -52,6 +52,8 @@ interface OrderWire {
   priceTierId?: string;
   cogs?: number;
   margin?: number;
+  platformFee?: number;
+  feeSource?: string;
   lines: {
     id: string;
     variantId: string;
@@ -86,6 +88,19 @@ const post = (
 ) =>
   requestAs(app, path, role, {
     method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+/** PATCH with a JSON body, same shape as post(). */
+const patch = (
+  app: ReturnType<typeof buildTestApp>,
+  path: string,
+  role: 'owner' | 'manager' | 'sales',
+  body: unknown,
+) =>
+  requestAs(app, path, role, {
+    method: 'PATCH',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
@@ -294,5 +309,38 @@ describe.skipIf(!url)('order routes (seeded database)', () => {
     expect(missing.status).toBe(404);
     const body = (await missing.json()) as ErrorWire;
     expect(body.error.code).toBe('not_found');
+  });
+
+  test('manager sets a manual platform fee; sales is refused and stripped', async () => {
+    const created = await post(app, '/api/v1/orders', 'sales', {
+      channelKind: 'pos',
+      lines: [{ variantId: SEED_IDS.variants.hoe, quantity: 1 }],
+    });
+    expect(created.status).toBe(201);
+    const bill = (await created.json()) as OrderWire;
+    // A POS bill starts with the default fee of 0 from source 'none'.
+    const asManager = await jsonAs<OrderWire>(app, `/api/v1/orders/${bill.id}`, 'manager');
+    expect(asManager.platformFee).toBe(0);
+    expect(asManager.feeSource).toBe('none');
+
+    const set = await patch(app, `/api/v1/orders/${bill.id}/fee`, 'manager', { fee: 3500 });
+    expect(set.status).toBe(200);
+    const updated = (await set.json()) as OrderWire;
+    expect(updated.platformFee).toBe(3500);
+    expect(updated.feeSource).toBe('manual');
+
+    // The override survives a read by another cost-bearing role.
+    const asOwner = await jsonAs<OrderWire>(app, `/api/v1/orders/${bill.id}`, 'owner');
+    expect(asOwner.platformFee).toBe(3500);
+    expect(asOwner.feeSource).toBe('manual');
+
+    // sales holds no cost:read: both fee fields are stripped from the JSON.
+    const asSales = await jsonAs<OrderWire>(app, `/api/v1/orders/${bill.id}`, 'sales');
+    expect('platformFee' in asSales).toBe(false);
+    expect('feeSource' in asSales).toBe(false);
+
+    // sales holds no cost:write either, so the PATCH itself is refused.
+    const refused = await patch(app, `/api/v1/orders/${bill.id}/fee`, 'sales', { fee: 3500 });
+    expect(refused.status).toBe(403);
   });
 });

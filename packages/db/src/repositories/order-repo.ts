@@ -9,10 +9,13 @@
 
 import {
   type ChannelId,
+  type FeeSource,
   type ImportBatchId,
   NotImplementedError,
+  type OrderId,
   type OrderStatus,
   type OrgId,
+  type Satang,
   StockHubError,
 } from '@stockhub/core';
 import { and, asc, desc, eq, gte, inArray, isNotNull, notInArray, sql } from 'drizzle-orm';
@@ -192,6 +195,34 @@ export const setOrderStatus = async (
     })
     .where(and(eq(orders.orgId, params.orgId), eq(orders.id, params.orderId)));
   return { previous: current.status };
+};
+
+/**
+ * Write the platform fee of one order; the service layer always passes
+ * source 'manual'.
+ *
+ * Mirrors setOrderStatus: the row is read FOR UPDATE first, so a fee override
+ * cannot interleave with a status change on the same bill, and a missing row
+ * is a stable not_found instead of a silent zero-row update.
+ */
+export const setOrderFee = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId; orderId: OrderId; fee: Satang; source: FeeSource },
+): Promise<void> => {
+  const [current] = await exec
+    .select({ id: orders.id })
+    .from(orders)
+    .where(and(eq(orders.orgId, params.orgId), eq(orders.id, params.orderId)))
+    .for('update');
+  if (!current) {
+    throw new StockHubError('not_found', `Order ${params.orderId} not found`, {
+      orderId: params.orderId,
+    });
+  }
+  await exec
+    .update(orders)
+    .set({ platformFee: params.fee, feeSource: params.source, updatedAt: new Date() })
+    .where(and(eq(orders.orgId, params.orgId), eq(orders.id, params.orderId)));
 };
 
 // ---------------------------------------------------------------------------
