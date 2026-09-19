@@ -330,7 +330,7 @@ Never print or commit `PG_URL`; it stays a shell value.
   Semantics (decision D4): marketplace kinds are exactly `IMPORTABLE_CHANNEL_KINDS`; the fee is `roundHalfUp(grandTotal * feeRateBps / 10000)` with source `channel_default`, or `0` / `none` for own channels. `orderProfit`: `netUnits = unitsSold - restoredUnits`; `netUnits <= 0` returns all zeros; otherwise `revenue = roundHalfUp(grandTotal * netUnits / unitsSold)`, `fee = roundHalfUp(platformFee * netUnits / unitsSold)`, `cogs = soldCost - restoredCost`, `profit = revenue - fee - cogs`.
 
 **Steps:**
-- [ ] Step 1: Implement `fee.ts`. Keep it free of every framework import. Guard `unitsSold <= 0` defensively (the SQL in L5 only returns orders with a sale, so this is a stop-gap, not a contract).
+- [x] Step 1: Implement `fee.ts`. Keep it free of every framework import. Guard `unitsSold <= 0` defensively (the SQL in L5 only returns orders with a sale, so this is a stop-gap, not a contract).
       ```ts
       const roundHalfUp = (value: number): number => Math.floor(value + 0.5);
 
@@ -346,10 +346,11 @@ Never print or commit `PG_URL`; it stays a shell value.
         return { fee, source: 'channel_default' };
       };
       ```
-- [ ] Step 2: Implement `orderProfit` in the same file with the exact semantics above; every division runs through `roundHalfUp` exactly once.
-- [ ] Step 3: Tests (pure, no DB): Shopee 1400 bps over 50500 gives `{ fee: 7070, source: 'channel_default' }`; rounding case grandTotal 333 at 1400 bps gives 47; `pos` gives `{ fee: 0, source: 'none' }`; TikTok with rate 0 gives fee 0 with source `channel_default`; `orderProfit` full sale (3 sold, 24000 cost, grandTotal 50000, fee 7000) gives profit 19000; partial return of 1 of 3 gives revenue 33333, fee 4667, cogs 16000, profit 12666; full return gives all zeros; a restoredCost above soldCost is impossible by construction, assert the function still never returns a negative cogs input pass-through (feeding restoredCost 24000 / soldCost 24000 with netUnits 0 gives zeros).
-- [ ] Step 4: Verify - Run: `bun test packages/core/src/services/profit/fee.test.ts && bun run --filter @stockhub/core typecheck && bun run --filter @stockhub/core lint` - Expected: 8 pass, 0 fail; typecheck and lint exit 0.
-- [ ] Step 5: Commit - `git commit -m "Add platform fee and order profit rules"`
+  > Deviation: `Satang` is a branded type, so the reference code's raw-number returns do not typecheck; `roundHalfUp` now constructs through `satang()` and the no-fee branch returns `ZERO` from domain/money. While appending the new export in index.ts, also removed the duplicated `export * from './services/pricing/resolve-price'` line (no-op duplicate).
+- [x] Step 2: Implement `orderProfit` in the same file with the exact semantics above; every division runs through `roundHalfUp` exactly once.
+- [x] Step 3: Tests (pure, no DB): Shopee 1400 bps over 50500 gives `{ fee: 7070, source: 'channel_default' }`; rounding case grandTotal 333 at 1400 bps gives 47; `pos` gives `{ fee: 0, source: 'none' }`; TikTok with rate 0 gives fee 0 with source `channel_default`; `orderProfit` full sale (3 sold, 24000 cost, grandTotal 50000, fee 7000) gives profit 19000; partial return of 1 of 3 gives revenue 33333, fee 4667, cogs 16000, profit 12666; full return gives all zeros; a restoredCost above soldCost is impossible by construction, assert the function still never returns a negative cogs input pass-through (feeding restoredCost 24000 / soldCost 24000 with netUnits 0 gives zeros).
+- [x] Step 4: Verify - Run: `bun test packages/core/src/services/profit/fee.test.ts && bun run --filter @stockhub/core typecheck && bun run --filter @stockhub/core lint` - Expected: 8 pass, 0 fail; typecheck and lint exit 0.
+- [x] Step 5: Commit - `git commit -m "Add platform fee and order profit rules"`
 
 #### Task L3: Write the fee when an import applies
 
