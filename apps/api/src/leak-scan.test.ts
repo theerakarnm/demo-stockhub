@@ -38,6 +38,9 @@ export const LEAK_SCAN_DB_PATHS: readonly string[] = [
   `/api/v1/pricing/resolve?variantIds=${SEED_IDS.variants.hoe},${SEED_IDS.variants.waterCan}&customerId=${SEED_IDS.customers.dealerNorth}`,
   '/api/v1/catalog/search?q=a',
   '/api/v1/listings',
+  // Profit answers 403 for both scanned roles, so this documents intent; the
+  // real redaction coverage for the feature lives in routes/reports.test.ts.
+  '/api/v1/reports/profit?from=2025-01-01&to=2025-01-31',
 ];
 
 /** The roles whose blocked keys must never appear in a shared payload. */

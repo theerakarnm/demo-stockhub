@@ -1,22 +1,23 @@
 /**
  * Reports.
  *
- * COGS is the one endpoint where the whole response is cost data, so it is
- * blocked by permission (403) instead of being stripped field by field. A
- * stripped COGS report would be an empty table, which is worse than an honest
- * "you may not see this". Channel sales and variance are quantity and selling
- * money, so any role that may read orders or stock may read them too.
+ * COGS and profit are the endpoints where the whole response is cost data, so
+ * they are blocked by permission (403) instead of being stripped field by
+ * field. A stripped cost report would be an empty table, which is worse than
+ * an honest "you may not see this". Channel sales and variance are quantity
+ * and selling money, so any role that may read orders or stock may read them.
  */
 
 import { Hono } from 'hono';
 import { ok } from '../lib/response';
 import { validate } from '../lib/validate';
 import { requirePermission } from '../middleware/require-permission';
-import { channelSalesQuery, cogsReportQuery, varianceQuery } from '../schemas/reports';
+import { channelSalesQuery, cogsReportQuery, profitQuery, varianceQuery } from '../schemas/reports';
 import { serviceContext } from '../services/context';
 import {
   getChannelSalesReport,
   getCogsReport,
+  getProfitReport,
   getVarianceReport,
 } from '../services/report-service';
 import type { AppEnv } from '../types/app';
@@ -37,4 +38,12 @@ export const reportsRouter = new Hono<AppEnv>()
     requirePermission('report:read', 'cost:read'),
     validate('query', cogsReportQuery),
     async (c) => ok(c, await getCogsReport(serviceContext(c), c.req.valid('query'))),
+  )
+  .get(
+    '/profit',
+    // Same gate as COGS: every field here derives from ledger cost, so a role
+    // without cost:read gets a 403 rather than an emptied report.
+    requirePermission('report:read', 'cost:read'),
+    validate('query', profitQuery),
+    async (c) => ok(c, await getProfitReport(serviceContext(c), c.req.valid('query'))),
   );

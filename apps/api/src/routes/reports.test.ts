@@ -101,6 +101,52 @@ interface CogsWire {
   totals: { unitsSold: number; revenue: number; cogs?: number; margin?: number };
 }
 
+interface ProfitOrderWire {
+  id: string;
+  externalOrderId: string;
+  channelId: string;
+  channelName: string;
+  channelKind: string;
+  status: string;
+  orderedAt: string;
+  unitsSold: number;
+  unitsReturned: number;
+  revenue: number;
+  fee?: number;
+  cogs?: number;
+  profit?: number;
+  feeSource?: string;
+}
+
+interface ProfitWire {
+  from: string;
+  to: string;
+  channelId?: string;
+  ordersInWindow: number;
+  rows: ProfitOrderWire[];
+  channelRows: {
+    channelId: string;
+    channelName: string;
+    channelKind: string;
+    orders: number;
+    unitsSold: number;
+    unitsReturned: number;
+    revenue: number;
+    fee?: number;
+    cogs?: number;
+    profit?: number;
+  }[];
+  totals: {
+    orders: number;
+    unitsSold: number;
+    unitsReturned: number;
+    revenue: number;
+    fee?: number;
+    cogs?: number;
+    profit?: number;
+  };
+}
+
 describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
   const app = buildTestApp((v1) =>
     v1
@@ -112,6 +158,9 @@ describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
 
   const now = new Date();
   const d30 = new Date(now.getTime() - 30 * 86_400_000);
+  // Two days back: inside the reports' windows but outside Bangkok "today",
+  // so the today-only dashboard buckets stay untouched by ORD-5.
+  const d2 = new Date(now.getTime() - 2 * 86_400_000);
   const today = bkkDate(now);
   const day30 = bkkDate(d30);
 
@@ -132,6 +181,13 @@ describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
           ('1a000000-0000-4000-8000-000000000003', ${ORG}, ${TIKTOK}, 'JTEST-ORD-3', 'cancelled', ${now.toISOString()}::timestamptz, 11000, 'ลูกค้าทดสอบ 3'),
           ('1a000000-0000-4000-8000-000000000004', ${ORG}, ${LAZADA}, 'JTEST-ORD-4', 'pending', ${now.toISOString()}::timestamptz, 100, 'ลูกค้าทดสอบ 4')
       `);
+      // ORD-5 is the profit fixture: it carries a stored manual fee, which the
+      // shared insert above (pre-fee columns) cannot express in one VALUES list.
+      await tx.execute(sql`
+        insert into orders (id, org_id, channel_id, external_order_id, status, ordered_at, grand_total, buyer_name, platform_fee, fee_source)
+        values
+          ('1a000000-0000-4000-8000-000000000005', ${ORG}, ${SHOPEE}, 'JTEST-ORD-5', 'delivered', ${d2.toISOString()}::timestamptz, 130000, 'ลูกค้าทดสอบ 5', 6500, 'manual')
+      `);
       // Lines: revenue rows for ORD-1/2/3, one deliberately unmatched for ORD-4.
       await tx.execute(sql`
         insert into order_lines (id, org_id, order_id, variant_id, platform_sku, platform_product_name, qty, unit_price, discount, match_source)
@@ -150,7 +206,8 @@ describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
           ('1c000000-0000-4000-8000-000000000002', ${ORG}, ${WATER_CAN}, ${WAREHOUSE}, 'adjust_out', -3, 26400, null, null, ${d30.toISOString()}::timestamptz, 'ปรับสต็อกทดสอบ ขาด 3'),
           ('1c000000-0000-4000-8000-000000000003', ${ORG}, ${WATER_CAN}, ${WAREHOUSE}, 'sale_out', -6, 56000, ${SHOPEE}, '1a000000-0000-4000-8000-000000000002', ${now.toISOString()}::timestamptz, 'ขายทดสอบวันนี้'),
           ('1c000000-0000-4000-8000-000000000004', ${ORG}, ${WATER_CAN}, ${WAREHOUSE}, 'cancel_restore', 2, 19200, ${TIKTOK}, '1a000000-0000-4000-8000-000000000003', ${now.toISOString()}::timestamptz, 'ยกเลิกทดสอบ คืน 2'),
-          ('1c000000-0000-4000-8000-000000000005', ${ORG}, ${WATER_CAN}, ${WAREHOUSE}, 'return_in', 1, 8800, ${SHOPEE}, '1a000000-0000-4000-8000-000000000002', ${now.toISOString()}::timestamptz, 'คืนสินค้าทดสอบ 1')
+          ('1c000000-0000-4000-8000-000000000005', ${ORG}, ${WATER_CAN}, ${WAREHOUSE}, 'return_in', 1, 8800, ${SHOPEE}, '1a000000-0000-4000-8000-000000000002', ${now.toISOString()}::timestamptz, 'คืนสินค้าทดสอบ 1'),
+          ('1c000000-0000-4000-8000-000000000006', ${ORG}, ${WATER_CAN}, ${WAREHOUSE}, 'sale_out', -2, 47000, ${SHOPEE}, '1a000000-0000-4000-8000-000000000005', ${d2.toISOString()}::timestamptz, 'ขายทดสอบ 2 วันก่อน')
       `);
       // FIFO slices of the two sales - the rows the COGS report reads.
       await tx.execute(sql`
@@ -172,6 +229,10 @@ describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
       await tx.execute(sql`
         update stock_lots set remaining_qty = remaining_qty + 1 where id = ${CAN_LOT_A}
       `);
+      // ORD-5's sale draws from lot B; restored by the afterAll reset below.
+      await tx.execute(sql`
+        update stock_lots set remaining_qty = remaining_qty - 2 where id = ${CAN_LOT_B}
+      `);
     });
   });
 
@@ -184,14 +245,14 @@ describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
         delete from movement_lot_consumptions where movement_id in (
           '1c000000-0000-4000-8000-000000000001', '1c000000-0000-4000-8000-000000000002',
           '1c000000-0000-4000-8000-000000000003', '1c000000-0000-4000-8000-000000000004',
-          '1c000000-0000-4000-8000-000000000005'
+          '1c000000-0000-4000-8000-000000000005', '1c000000-0000-4000-8000-000000000006'
         )
       `);
       await tx.execute(sql`
         delete from stock_movements where id in (
           '1c000000-0000-4000-8000-000000000001', '1c000000-0000-4000-8000-000000000002',
           '1c000000-0000-4000-8000-000000000003', '1c000000-0000-4000-8000-000000000004',
-          '1c000000-0000-4000-8000-000000000005'
+          '1c000000-0000-4000-8000-000000000005', '1c000000-0000-4000-8000-000000000006'
         )
       `);
       await tx.execute(sql`
@@ -203,7 +264,8 @@ describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
       await tx.execute(sql`
         delete from orders where id in (
           '1a000000-0000-4000-8000-000000000001', '1a000000-0000-4000-8000-000000000002',
-          '1a000000-0000-4000-8000-000000000003', '1a000000-0000-4000-8000-000000000004'
+          '1a000000-0000-4000-8000-000000000003', '1a000000-0000-4000-8000-000000000004',
+          '1a000000-0000-4000-8000-000000000005'
         )
       `);
       // The seed layers must end exactly where they started.
@@ -401,5 +463,101 @@ describe.skipIf(!url)('dashboard and reports (seeded database)', () => {
     expect(report.totals.unitsSold).toBe(report.rows.reduce((sum, row) => sum + row.unitsSold, 0));
     expect(report.totals.revenue).toBe(report.rows.reduce((sum, row) => sum + row.revenue, 0));
     expect(report.totals.unitsSold).toBeGreaterThanOrEqual(10);
+  });
+
+  // -------------------------------------------------------------------------
+  // J4 - profit report
+  // -------------------------------------------------------------------------
+
+  describe('profit report', () => {
+    const profitPath = `/api/v1/reports/profit?from=${bkkDateOffset(35)}&to=${today}`;
+    const ORD5 = '1a000000-0000-4000-8000-000000000005';
+
+    test('serves the fixture ledger to the owner, fee math pinned to ORD-5', async () => {
+      const res = await requestAs(app, profitPath, 'owner');
+      expect(res.status).toBe(200);
+      const report = (await res.json()) as ProfitWire;
+
+      // ORD-5: grand total 130000, stored manual fee 6500, sold 2 for 47000,
+      // nothing returned - every number on this row comes from the fixture.
+      const ord5 = report.rows.find((row) => row.id === ORD5);
+      expect(ord5?.externalOrderId).toBe('JTEST-ORD-5');
+      expect(ord5?.channelId).toBe(SHOPEE);
+      expect(ord5?.channelName).toBe('Shopee - ร้านหลัก');
+      expect(ord5?.channelKind).toBe('shopee');
+      expect(ord5?.status).toBe('delivered');
+      expect(ord5?.unitsSold).toBe(2);
+      expect(ord5?.unitsReturned).toBe(0);
+      expect(ord5?.revenue).toBe(130000);
+      expect(ord5?.fee).toBe(6500);
+      expect(ord5?.cogs).toBe(47000);
+      expect(ord5?.profit).toBe(130000 - 6500 - 47000);
+      expect(ord5?.feeSource).toBe('manual');
+      // Rows come back newest first.
+      const orderedAts = report.rows.map((row) => row.orderedAt);
+      const sorted = [...orderedAts].sort((a, b) => b.localeCompare(a));
+      expect(orderedAts).toEqual(sorted);
+    });
+
+    test('every row satisfies profit = revenue - fee - cogs', async () => {
+      const report = await jsonAs<ProfitWire>(app, profitPath, 'owner');
+      expect(report.rows.length).toBeGreaterThanOrEqual(3);
+      for (const row of report.rows) {
+        expect(row.profit).toBe(row.revenue - (row.fee ?? 0) - (row.cogs ?? 0));
+      }
+    });
+
+    test('channelRows carry each channel with summed profit, biggest first', async () => {
+      const report = await jsonAs<ProfitWire>(app, profitPath, 'owner');
+      const shopee = report.channelRows.find((row) => row.channelId === SHOPEE);
+      const shopeeRows = report.rows.filter((row) => row.channelId === SHOPEE);
+      expect(shopee?.orders).toBe(shopeeRows.length);
+      expect(shopee?.unitsSold).toBe(shopeeRows.reduce((sum, row) => sum + row.unitsSold, 0));
+      expect(shopee?.unitsReturned).toBe(
+        shopeeRows.reduce((sum, row) => sum + row.unitsReturned, 0),
+      );
+      expect(shopee?.revenue).toBe(shopeeRows.reduce((sum, row) => sum + row.revenue, 0));
+      expect(shopee?.profit).toBe(shopeeRows.reduce((sum, row) => sum + (row.profit ?? 0), 0));
+      const profits = report.channelRows.map((row) => row.profit ?? 0);
+      const sorted = [...profits].sort((a, b) => b - a);
+      expect(profits).toEqual(sorted);
+    });
+
+    test('totals equal the sum of channelRows and the window is untruncated', async () => {
+      const report = await jsonAs<ProfitWire>(app, profitPath, 'owner');
+      expect(report.ordersInWindow).toBe(
+        report.channelRows.reduce((sum, row) => sum + row.orders, 0),
+      );
+      expect(report.totals.orders).toBe(
+        report.channelRows.reduce((sum, row) => sum + row.orders, 0),
+      );
+      expect(report.totals.unitsSold).toBe(
+        report.channelRows.reduce((sum, row) => sum + row.unitsSold, 0),
+      );
+      expect(report.totals.unitsReturned).toBe(
+        report.channelRows.reduce((sum, row) => sum + row.unitsReturned, 0),
+      );
+      expect(report.totals.revenue).toBe(
+        report.channelRows.reduce((sum, row) => sum + row.revenue, 0),
+      );
+      expect(report.totals.fee).toBe(
+        report.channelRows.reduce((sum, row) => sum + (row.fee ?? 0), 0),
+      );
+      expect(report.totals.cogs).toBe(
+        report.channelRows.reduce((sum, row) => sum + (row.cogs ?? 0), 0),
+      );
+      expect(report.totals.profit).toBe(
+        report.channelRows.reduce((sum, row) => sum + (row.profit ?? 0), 0),
+      );
+    });
+
+    test('a role without cost:read gets a 403, never a stripped report', async () => {
+      for (const role of ['sales', 'stock_staff'] as const) {
+        const res = await requestAs(app, profitPath, role);
+        expect(res.status).toBe(403);
+        const body = (await res.json()) as { error: { code: string } };
+        expect(body.error.code).toBe('forbidden');
+      }
+    });
   });
 });

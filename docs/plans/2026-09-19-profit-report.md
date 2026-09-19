@@ -534,7 +534,7 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
 **Gotcha:** the profit endpoint response is built per-role by `ok()`'s redaction like every other route, but the route ALSO 403s for roles without `cost:read`, so stripping never fires in practice - exactly the COGS report's situation, and for the same reason ("a stripped profit report would be an empty table").
 
 **Steps:**
-- [ ] Step 1: Schema. `cogsReportQuery` is a `ZodEffects` (`z.object(...).refine(...)`, `apps/api/src/schemas/reports.ts:26-33`) and zod 3 has no `.extend` on it, so restate the object:
+- [x] Step 1: Schema. `cogsReportQuery` is a `ZodEffects` (`z.object(...).refine(...)`, `apps/api/src/schemas/reports.ts:26-33`) and zod 3 has no `.extend` on it, so restate the object:
       ```ts
       export const profitQuery = z
         .object({
@@ -551,14 +551,22 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
       export type ProfitQuery = z.infer<typeof profitQuery>;
       ```
       (`idString` is already imported in this file.)
-- [ ] Step 2: Service `getProfitReport`: build `fromAt` / `toAt` exactly like `getCogsReport` (Bangkok midnights, `to` exclusive after +1 day); call `listProfitOrders`; map each row through `orderProfit({ grandTotal: satang(row.grandTotal), platformFee: satang(row.platformFee), unitsSold: row.unitsSold, soldCost: row.soldCost, restoredUnits: row.restoredUnits, restoredCost: row.restoredCost })`; assemble `rows` (first `limit`), then `channelRows` by grouping the FULL mapped set with a `Map<channelId, ChannelProfitRow>` summed field by field, sorted by profit desc; `totals` by summing the full set; `ordersInWindow` = full length. Keep every integer a `Satang`/number - no floats anywhere.
-- [ ] Step 3: Route entry copying the COGS entry's shape with `validate('query', profitQuery)`.
-- [ ] Step 4: Contract types with every marker exactly as in Interfaces; import `FeeSource` type from core.
-- [ ] Step 5: `leak-scan.test.ts`: append `'/api/v1/reports/profit?from=2025-01-01&to=2025-01-31'` to `LEAK_SCAN_DB_PATHS`. Honest note: the scan only walks `LEAK_SCAN_ROLES` (`sales`, `stock_staff`, `apps/api/src/leak-scan.test.ts:45`) and this route answers both with 403, so the appended path scans no body and documents intent only - the real redaction coverage for this feature is Step 6's route tests plus the Task L4 orders assertions.
-- [ ] Step 6: `reports.test.ts`: inside the existing fixture machinery (the setup transaction that already creates a sale for the water-can), add one shopee-shaped order + `sale_out` movement (reuse the fixture's insertion helpers; if the fixtures live in the setup test's transaction, extend it in place), then a new `describe` that asserts as `owner`: 200; the order row's `profit === revenue - fee - cogs` identity; the fixture order appears with `feeSource` from its stored fee; `channelRows` contains its channel with summed profit; `totals` equals the sum of channelRows; as `sales` and as `stock_staff`: 403 with the standard error envelope code `forbidden`.
-- [ ] Step 7: README row: `| `GET /api/v1/reports/profit?from=&to=` | `cost:read` | query: `from`, `to` dates, `channelId` optional, `limit` 1-1000 default 200 | `ProfitReport`, 403 without `cost:read` |`.
-- [ ] Step 8: Verify - Run: `DATABASE_URL="$PG_URL" bun test apps/api/src/routes/reports.test.ts apps/api/src/leak-scan.test.ts apps/api/src/contract-audit.test.ts && bun run --filter @stockhub/api typecheck && bun run --filter @stockhub/api lint` - Expected: all pass, 0 fail; typecheck and lint exit 0.
-- [ ] Step 9: Commit - `git commit -m "Serve the profit report from the ledger"`
+- [x] Step 2: Service `getProfitReport`: build `fromAt` / `toAt` exactly like `getCogsReport` (Bangkok midnights, `to` exclusive after +1 day); call `listProfitOrders`; map each row through `orderProfit({ grandTotal: satang(row.grandTotal), platformFee: satang(row.platformFee), unitsSold: row.unitsSold, soldCost: row.soldCost, restoredUnits: row.restoredUnits, restoredCost: row.restoredCost })`; assemble `rows` (first `limit`), then `channelRows` by grouping the FULL mapped set with a `Map<channelId, ChannelProfitRow>` summed field by field, sorted by profit desc; `totals` by summing the full set; `ordersInWindow` = full length. Keep every integer a `Satang`/number - no floats anywhere.
+- [x] Step 3: Route entry copying the COGS entry's shape with `validate('query', profitQuery)`.
+      > Deviation: the route file's header comment said "COGS is the one endpoint where
+      > the whole response is cost data"; with a second such endpoint it was reworded to
+      > cover both, keeping the comment truthful.
+- [x] Step 4: Contract types with every marker exactly as in Interfaces; import `FeeSource` type from core.
+- [x] Step 5: `leak-scan.test.ts`: append `'/api/v1/reports/profit?from=2025-01-01&to=2025-01-31'` to `LEAK_SCAN_DB_PATHS`. Honest note: the scan only walks `LEAK_SCAN_ROLES` (`sales`, `stock_staff`, `apps/api/src/leak-scan.test.ts:45`) and this route answers both with 403, so the appended path scans no body and documents intent only - the real redaction coverage for this feature is Step 6's route tests plus the Task L4 orders assertions.
+- [x] Step 6: `reports.test.ts`: inside the existing fixture machinery (the setup transaction that already creates a sale for the water-can), add one shopee-shaped order + `sale_out` movement (reuse the fixture's insertion helpers; if the fixtures live in the setup test's transaction, extend it in place), then a new `describe` that asserts as `owner`: 200; the order row's `profit === revenue - fee - cogs` identity; the fixture order appears with `feeSource` from its stored fee; `channelRows` contains its channel with summed profit; `totals` equals the sum of channelRows; as `sales` and as `stock_staff`: 403 with the standard error envelope code `forbidden`.
+      > Deviation: the fixture order (ORD-5) needed its own INSERT statement - Postgres
+      > multi-row VALUES lists require equal-length tuples and the pre-fee shared insert
+      > has 8 columns. ORD-5's `ordered_at` / movement `occurred_at` sit 2 days back so
+      > the today-only dashboard buckets are untouched; this left every pre-existing
+      > assertion in the file valid unchanged (verified: 19/19 in reports.test.ts).
+- [x] Step 7: README row: `| `GET /api/v1/reports/profit?from=&to=` | `cost:read` | query: `from`, `to` dates, `channelId` optional, `limit` 1-1000 default 200 | `ProfitReport`, 403 without `cost:read` |`.
+- [x] Step 8: Verify - Run: `DATABASE_URL="$PG_URL" bun test apps/api/src/routes/reports.test.ts apps/api/src/leak-scan.test.ts apps/api/src/contract-audit.test.ts && bun run --filter @stockhub/api typecheck && bun run --filter @stockhub/api lint` - Expected: all pass, 0 fail; typecheck and lint exit 0.
+- [x] Step 9: Commit - `git commit -m "Serve the profit report from the ledger"`
 
 #### Task L7: Web client layer for profit + fee
 
