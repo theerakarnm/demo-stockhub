@@ -18,6 +18,7 @@ import type {
   CreateImportInput,
   CreateOrderInput,
   DashboardSummary,
+  DemoResetResult,
   HealthResponse,
   ImportBatch,
   ImportDetailResponse,
@@ -218,6 +219,17 @@ export const api = {
     demo(
       () => mockApi.variance(query),
       () => request<VarianceReport>(withQuery('/api/v1/reports/variance', { ...query })),
+    ),
+
+  /** POST /api/v1/demo/reset - guided walkthrough only, 404 outside development. */
+  resetDemo: (): Promise<DemoResetResult> =>
+    demo(
+      () => Promise.resolve({ variantCount: 19, lotCount: 30, onHand: 2822, stockValue: 37924500 }),
+      () =>
+        request<DemoResetResult>('/api/v1/demo/reset', {
+          method: 'POST',
+          body: {},
+        }),
     ),
 
   /** GET /api/v1/reports/cogs - 403 for roles without cost:read. */

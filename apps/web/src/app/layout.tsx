@@ -1,6 +1,9 @@
 import { RoleProvider } from '@/components/role-provider';
 import { Sidebar } from '@/components/sidebar';
 import { Topbar } from '@/components/topbar';
+import { TourPanel } from '@/components/tour/tour-panel';
+import { TourProvider } from '@/components/tour/tour-provider';
+import { GUIDED_DEMO } from '@/lib/config';
 import type { Metadata } from 'next';
 import { IBM_Plex_Sans_Thai } from 'next/font/google';
 import './globals.css';
@@ -41,6 +44,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <div className="mx-auto w-full max-w-7xl">{children}</div>
               </main>
             </div>
+            {/* The guided walkthrough is a third shell column. When the flag is
+                off neither the provider nor the panel exists in the bundle -
+                there is no hidden element to find, which is the point. */}
+            {GUIDED_DEMO ? (
+              <TourProvider>
+                <TourPanel />
+              </TourProvider>
+            ) : null}
           </div>
         </RoleProvider>
       </body>

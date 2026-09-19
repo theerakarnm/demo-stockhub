@@ -69,6 +69,14 @@ export interface ApiErrorEnvelope {
 // GET /health, GET /api/v1/me
 // ---------------------------------------------------------------------------
 
+export interface DemoResetResult {
+  variantCount: number;
+  lotCount: number;
+  onHand: number;
+  /** cost field - stripped for roles without cost:read */
+  stockValue?: number;
+}
+
 export interface HealthResponse {
   status: 'ok' | 'degraded';
   version: string;
