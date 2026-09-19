@@ -7,6 +7,7 @@ export { catalogRouter } from './catalog';
 export { channelsRouter } from './channels';
 export { customersRouter } from './customers';
 export { dashboardRouter } from './dashboard';
+export { demoRouter } from './demo';
 export { healthRouter } from './health';
 export { importsRouter } from './imports';
 export { inventoryRouter } from './inventory';

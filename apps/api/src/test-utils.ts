@@ -114,12 +114,16 @@ export const requestAs = async (
   path: string,
   role: Role,
   init?: RequestInit,
+  // Per-call override. `testEnv` is a module singleton shared by every suite,
+  // so a test that needs different bindings (a second database, another
+  // ENVIRONMENT) must pass its own copy instead of mutating the shared one.
+  env: Env = testEnv,
 ): Promise<Response> => {
   const headers: Record<string, string> = {
     ...asRole(role).headers,
     ...Object.fromEntries(new Headers(init?.headers)),
   };
-  return app.request(path, { ...init, headers }, testEnv);
+  return app.request(path, { ...init, headers }, env);
 };
 
 /** requestAs, but returns the parsed JSON body typed by the caller. */
@@ -128,8 +132,9 @@ export const jsonAs = async <T>(
   path: string,
   role: Role,
   init?: RequestInit,
+  env: Env = testEnv,
 ): Promise<T> => {
-  const res = await requestAs(app, path, role, init);
+  const res = await requestAs(app, path, role, init, env);
   return (await res.json()) as T;
 };
 

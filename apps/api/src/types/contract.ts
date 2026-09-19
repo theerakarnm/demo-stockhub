@@ -402,6 +402,21 @@ export interface VarianceReport {
   rows: VarianceRow[];
 }
 
+/**
+ * Result of POST /demo/reset.
+ *
+ * `lotCount` is deliberately not called `lots`: `lots` is in COST_KEYS, so the
+ * whole key would be stripped for a role without cost:read and the caller could
+ * not tell "redacted" from "zero lots".
+ */
+export interface DemoResetResult {
+  variantCount: number;
+  lotCount: number;
+  onHand: number;
+  /** cost field */
+  stockValue?: MoneyOnWire;
+}
+
 /** Envelope for every cursor paginated list endpoint. */
 export interface Page<T> {
   items: T[];

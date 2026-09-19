@@ -21,6 +21,7 @@ import {
   channelsRouter,
   customersRouter,
   dashboardRouter,
+  demoRouter,
   healthRouter,
   importsRouter,
   inventoryRouter,
@@ -51,7 +52,8 @@ const v1 = new Hono<AppEnv>()
   .route('/listings', listingsRouter)
   .route('/customers', customersRouter)
   .route('/price-tiers', priceTiersRouter)
-  .route('/pricing', pricingRouter);
+  .route('/pricing', pricingRouter)
+  .route('/demo', demoRouter);
 
 const app = new Hono<AppEnv>();
 
