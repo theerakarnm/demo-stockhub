@@ -15,6 +15,7 @@ import {
   QtyDelta,
 } from '@/components/domain-badges';
 import { CancelOrderDialog } from '@/components/orders/cancel-order-dialog';
+import { LotTraceCard } from '@/components/orders/lot-trace-card';
 import { ReturnOrderDialog } from '@/components/orders/return-order-dialog';
 import { PermissionGate } from '@/components/permission-gate';
 import { useRole } from '@/components/role-provider';
@@ -373,6 +374,9 @@ export default function OrderDetailPage() {
             <div className="space-y-4">
               <BillInfoCard order={data} customer={customer.data} />
               <BillTotalsCard order={data} />
+              <PermissionGate permission="cost:read">
+                <LotTraceCard orderId={data.id} />
+              </PermissionGate>
               <p className="flex items-center gap-1.5 px-1 text-xs text-slate-400">
                 <ReceiptText className="size-3.5" aria-hidden />
                 เลขที่ออเดอร์ภายใน {data.id}

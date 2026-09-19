@@ -243,10 +243,23 @@ export interface Movement {
   unitCost?: MoneyAmount;
   /** cost-gated - COGS for outbound, lot value for inbound. */
   totalCost?: MoneyAmount;
+  /** cost-gated - the exact FIFO lot slices, present on the per-order read. */
+  consumptions?: MovementConsumption[];
+}
+
+export interface MovementConsumption {
+  lotId: string;
+  qty: number;
+  /** cost-gated */
+  unitCost: MoneyAmount;
+  /** cost-gated */
+  lineCost: MoneyAmount;
 }
 
 export interface MovementsQuery {
   variantId?: string;
+  /** All movements caused by one order (the bill's lot-trace card). */
+  orderId?: string;
   reason?: MovementReason;
   /** ISO date, inclusive. */
   from?: string;

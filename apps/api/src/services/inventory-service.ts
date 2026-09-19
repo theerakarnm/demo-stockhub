@@ -231,6 +231,42 @@ export const listMovements = async (
   ctx: ServiceContext,
   query: ListMovementsQuery,
 ): Promise<Page<Movement>> => {
+  // Per-order read: the bill's lot-trace card needs the exact lot slices, and
+  // listMovementsForOrder carries them (the ledger-wide window balance would
+  // only be a meaningless partial number here). Not paginated - one order has
+  // a handful of movements at most.
+  if (query.orderId) {
+    const rows = await movementRepo.listMovementsForOrder(ctx.db(), {
+      orgId: ctx.auth.orgId,
+      orderId: query.orderId,
+    });
+    return {
+      items: rows.map((row) => ({
+        id: row.id,
+        variantId: row.variantId,
+        sku: row.sku,
+        name: row.productName,
+        reason: row.reason,
+        qtyDelta: row.qtyDelta,
+        warehouseId: row.warehouseId,
+        channelId: row.channelId ?? undefined,
+        orderId: row.orderId ?? undefined,
+        note: row.note ?? undefined,
+        occurredAt: row.occurredAt.toISOString(),
+        createdBy: row.createdBy ?? undefined,
+        unitCost: row.qtyDelta === 0 ? 0 : Math.round(row.costTotal / Math.abs(row.qtyDelta)),
+        totalCost: row.costTotal,
+        consumptions: row.consumptions.map((slice) => ({
+          lotId: slice.lotId,
+          qty: slice.qty,
+          unitCost: slice.unitCost,
+          lineCost: slice.lineCost,
+        })),
+      })),
+      nextCursor: null,
+    };
+  }
+
   const cursor = query.cursor ? decodeCursor(query.cursor) : undefined;
   const rows = await movementRepo.listHistory(ctx.db(), {
     orgId: ctx.auth.orgId,

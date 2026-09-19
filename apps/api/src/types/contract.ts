@@ -156,8 +156,9 @@ export interface Movement {
   reason: MovementReason;
   /** Positive inbound, negative outbound. */
   qtyDelta: number;
-  /** Running balance of the variant right after this movement. */
-  qtyAfter: number;
+  /** Running balance of the variant right after this movement. Absent on the
+   *  per-order read, where a window sum over one order would be meaningless. */
+  qtyAfter?: number;
   /** Where the stock physically moved. */
   warehouseId: string;
   channelId?: string;
