@@ -3,15 +3,18 @@
 /**
  * The right-hand walkthrough panel: the third column of the app shell.
  *
- * Controls: ทำเสร็จแล้ว (capture after + advance), ถัดไป, ย้อน, ข้ามทัวร์,
- * ดู JSON ดิบ (step 19 - proves cost keys are stripped server-side) and
- * รีเซ็ต Demo (step 20). The panel never edits page DOM; it only reads
- * snapshots and navigates.
+ * First open shows the start card - the guidance the demo promises, visible
+ * without reading anything. After that the panel follows the active step:
+ * plain-Thai narration, a ทำเสร็จแล้ว button that captures a live dashboard
+ * read for the data-flow card (before arriving / after finishing, never
+ * hardcoded), and the tour controls. Panel and provider mount only when
+ * NEXT_PUBLIC_GUIDED_DEMO is on; print:hidden keeps the tour off the printed
+ * bill (scene 14).
  *
- * print:hidden keeps the tour off the printed bill (scene 14), and the
- * overflow-y-auto keeps the h-screen shell from clipping it.
+ * The panel never edits page DOM; it only reads snapshots and navigates.
  */
 
+import { Button } from '@/components/ui';
 import { api } from '@/lib/api-client';
 import type { DashboardSummary } from '@/lib/api-types';
 import { DEMO_MODE } from '@/lib/config';
@@ -24,6 +27,7 @@ import { TourSpotlight } from './tour-spotlight';
 import { TOUR_STEPS, stepPathFor } from './tour-steps';
 import { useStepSnapshot } from './use-tour-step';
 
+/** Steps that only read: no before/after capture, no ทำเสร็จแล้ว button. */
 const READ_ONLY_STEPS = new Set([1, 5, 11, 13, 14, 17, 18, 19]);
 
 /** Path without the query string. `[0]` on split is `string | undefined` under noUncheckedIndexedAccess. */
@@ -33,6 +37,7 @@ export function TourPanel() {
   const tour = useTour();
   const router = useRouter();
   const [rawJson, setRawJson] = useState<string | null>(null);
+  const [resetting, setResetting] = useState(false);
   const snapshot = useStepSnapshot();
 
   const state = tour?.state;
@@ -67,7 +72,7 @@ export function TourPanel() {
     }
   }, []);
 
-  if (!tour || !state || !step) return null;
+  if (!tour || !state) return null;
 
   if (state.dismissed) {
     return (
@@ -78,6 +83,44 @@ export function TourPanel() {
       >
         เปิดทัวร์ ({state.completedSteps.length}/{TOUR_STEPS.length})
       </button>
+    );
+  }
+
+  if (state.currentStep === 0 || !step) {
+    // First open: the start card IS the guidance the demo promises.
+    return (
+      <aside
+        data-tour-id="tour-panel"
+        className="flex w-80 shrink-0 flex-col gap-3 overflow-y-auto border-l border-slate-200 bg-white p-4 print:hidden"
+      >
+        {DEMO_MODE ? (
+          <p className="rounded-lg bg-red-100 p-2 text-xs font-medium text-red-800">
+            กำลังใช้ข้อมูลจำลอง ตัวเลขไม่ใช่ของจริง ตั้ง NEXT_PUBLIC_DEMO_MODE=false แล้วเปิดใหม่
+          </p>
+        ) : null}
+        <div>
+          <h2 className="text-base font-semibold text-slate-900">เริ่มทัวร์ 15 นาที</h2>
+          <p className="mt-2 text-sm text-slate-600">
+            เดินร้านเกษตรรุ่งเรืองหนึ่งวันทำงาน: รับของ นำเข้าออเดอร์ 3 แพลตฟอร์ม ขายส่ง ยกเลิก ดูกำไร
+            แล้วสลับมุมมองพนักงาน ทุกขั้นมีปุ่มช่วยกรอกให้ ไม่ต้องเตรียมไฟล์เอง
+          </p>
+        </div>
+        <Button
+          data-tour-id="tour-start"
+          onClick={() => {
+            tour.next();
+          }}
+        >
+          เริ่มทัวร์ 15 นาที
+        </Button>
+        <button
+          type="button"
+          onClick={tour.dismiss}
+          className="rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
+        >
+          ข้ามทัวร์
+        </button>
+      </aside>
     );
   }
 
@@ -129,7 +172,7 @@ export function TourPanel() {
 
         {step.sample?.kind === 'receive' ? (
           <div className="rounded-lg bg-slate-50 p-2 text-xs text-slate-700">
-            <p className="font-medium">ค่าที่ปุ่ม "กรอกค่าตัวอย่าง" จะใส่ให้</p>
+            <p className="font-medium">ค่าที่ปุ่ม &quot;กรอกค่าตัวอย่าง&quot; จะใส่ให้</p>
             <p className="mt-1">
               {step.sample.sku} / {step.sample.qty} /{' '}
               {step.sample.unitCostBaht.toLocaleString('th-TH')} / {step.sample.receivedAt} /{' '}
@@ -172,13 +215,9 @@ export function TourPanel() {
 
         <div className="mt-auto space-y-2">
           {!READ_ONLY_STEPS.has(step.step) ? (
-            <button
-              type="button"
-              onClick={() => void markDone()}
-              className="w-full rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
-            >
+            <Button className="w-full" onClick={() => void markDone()}>
               ฉันทำแล้ว ✓
-            </button>
+            </Button>
           ) : null}
           <div className="flex gap-2">
             <button
@@ -204,7 +243,9 @@ export function TourPanel() {
             >
               ข้ามทัวร์
             </button>
-            <ResetDemoButton onReset={tour.reset} />
+            <div className="flex-1">
+              <ResetDemoButton onReset={tour.reset} />
+            </div>
           </div>
         </div>
       </aside>
