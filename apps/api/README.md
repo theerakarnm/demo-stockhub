@@ -127,6 +127,8 @@ Tier fields (`priceTierId`, `priceTierCode`, `priceTierName`, `tierPrices`, `pri
 | `POST /api/v1/imports/:id/match` | `import:run` | body: `{ platformSku, variantId }` | `{ linesUpdated, unmatchedRemaining }` |
 | `POST /api/v1/imports/:id/apply` | `import:run` | body: `{ ignoreUnmatched? }`, may be empty | `ApplyImportResult`, `cogs` is a cost field |
 | `GET /api/v1/dashboard/summary` | `stock:read` | none | `DashboardSummary`, `stockValue` is a cost field |
+| `POST /api/v1/demo/reset` | `stock:adjust` | none | `DemoResetResult`, 404 unless `ENVIRONMENT=development`, re-seeds the database (see `packages/db/src/seed/seed-data.ts`) |
+| `GET /api/v1/movements?orderId=` | `stock:read` | query: `orderId` | `Movement[]` for one order, each row carries `consumptions` (cost fields); pairs with `GET /api/v1/movements` |
 | `GET /api/v1/reports/channel-sales?days=` | `order:read` | query: `days` 1-365, default 7 | `ChannelSalesRow[]` |
 | `GET /api/v1/reports/variance?days=` | `stock:read` | query: `days` 1-365, default 7 | `VarianceRow[]` |
 | `GET /api/v1/reports/cogs?from=&to=` | `cost:read` | query: `from`, `to` dates, `channelId` optional | `CogsReportRow[]`, 403 without `cost:read` |
