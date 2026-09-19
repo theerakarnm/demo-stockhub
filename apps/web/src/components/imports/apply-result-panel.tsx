@@ -21,22 +21,34 @@ function ResultStat({ label, value }: { label: string; value: ReactNode }) {
 }
 
 export function ApplyResultPanel({ result }: { result: ApplyImportResult }) {
+  // A file whose every order was cancelled restores stock and subtracts its
+  // recorded COGS, so cogs arrives NEGATIVE (import-service subtracts the
+  // reversal from the running total). Showing "-294.00" under a green
+  // "ตัดสต็อกเรียบร้อย" headline reads like a crash; the restore wording says
+  // what actually happened.
+  const isRestore = result.cogs !== undefined && result.cogs < 0;
+  const headline = isRestore ? 'นำเข้าและคืนสต็อกเรียบร้อย' : 'นำเข้าและตัดสต็อกเรียบร้อย';
+  const description = isRestore
+    ? 'ไฟล์นี้แจ้งยกเลิกออเดอร์ที่เคยตัดสต็อกไป ระบบคืนของเข้าคลังที่ต้นทุนเดิมแล้ว'
+    : 'ออเดอร์ถูกบันทึกและสต็อกในคลังกลางถูกตัดตามจำนวนที่ขายจริงแล้ว';
+
   return (
     <section className="rounded-xl border border-emerald-300 bg-emerald-50/70 p-4 shadow-sm">
       <div className="flex items-start gap-3">
         <CheckCircle2 className="mt-0.5 size-6 shrink-0 text-emerald-600" aria-hidden />
         <div>
-          <h2 className="text-sm font-semibold text-slate-900">นำเข้าและตัดสต็อกเรียบร้อย</h2>
-          <p className="mt-0.5 text-xs text-slate-600">
-            ออเดอร์ถูกบันทึกและสต็อกในคลังกลางถูกตัดตามจำนวนที่ขายจริงแล้ว
-          </p>
+          <h2 className="text-sm font-semibold text-slate-900">{headline}</h2>
+          <p className="mt-0.5 text-xs text-slate-600">{description}</p>
         </div>
       </div>
 
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <ResultStat label="ความเคลื่อนไหวสต็อกที่สร้าง" value={qty(result.movementsCreated)} />
         <ResultStat label="ออเดอร์ที่บันทึก" value={qty(result.ordersApplied)} />
-        <ResultStat label="ต้นทุนขายรวม (COGS)" value={<CostValue value={result.cogs} />} />
+        <ResultStat
+          label={isRestore ? 'ทุนที่คืนเข้าคลัง' : 'ต้นทุนขายรวม (COGS)'}
+          value={<CostValue value={isRestore ? (result.cogs ?? 0) * -1 : result.cogs} />}
+        />
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
