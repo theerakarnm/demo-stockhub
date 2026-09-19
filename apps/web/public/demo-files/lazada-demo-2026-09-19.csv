@@ -1,0 +1,5 @@
+orderNumber,orderItemId,createTime,deliveredDate,status,sellerSku,lazadaSku,itemName,variation,quantity,unitPrice,paidPrice,sellerDiscountTotal,orderTotal,customerName
+LZD26091901,21000000000001,2026-09-19 10:05:00,2026-09-20 09:00:00,delivered,LZD-FRT-16-50,LZD-ID-7001,ปุ๋ย 16-16-16 กระสอบ 50 กิโล,,2,980.00,1960.00,0.00,1960.00,demo_lazada_a
+LZD26091902,21000000000002,2026-09-19 11:31:44,2026-09-20 09:00:00,delivered,LZD-SPR16,LZD-ID-7002,ถังพ่นยา 16 ลิตร สะพายหลัง,,1,890.00,890.00,0.00,890.00,demo_lazada_b
+LZD26091903,21000000000003,2026-09-19 13:14:55,2026-09-20 09:00:00,delivered,BLD-3T-255,LZD-ID-7003,ใบมีดตัดหญ้า 3 ฟัน 10 นิ้ว,,10,95.00,950.00,0.00,950.00,demo_lazada_c
+LZD26091903,,2026-09-19 13:14:55,2026-09-20 09:00:00,delivered,,LZD-ID-7004,ถุงมือทำสวนเคลือบยาง,,2,55.00,110.00,0.00,110.00,demo_lazada_c

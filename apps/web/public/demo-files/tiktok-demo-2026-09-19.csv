@@ -1,0 +1,4 @@
+Order ID,Order Status,Order Substatus,Created Time,Shipped Time,Seller SKU,SKU ID,Product Name,Variation,Quantity,SKU Unit Original Price,SKU Seller Discount,SKU Subtotal After Discount,Order Amount,Buyer Username
+The unique ID of the order,Current status of the order,Detailed status of the order,Time the order was created,Time the parcel was handed over,SKU code set by the seller,TikTok Shop SKU ID,Name of the product,Product variation,Number of units,Original unit price,Discount funded by the seller,Subtotal after discount,Total paid by the buyer,Buyer account name
+TTD26091901,Completed,Delivered,19/09/2026 09:30:00,19/09/2026 18:05:00,TT-LIVE-SET-WATER,17290000000001001,ชุดรดน้ำต้นไม้ครบชุด ไลฟ์สด,,3,690.00,0.00,2070.00,2070.00,demo_tiktok_live
+TTD26091902,Completed,Delivered,19/09/2026 11:02:19,19/09/2026 18:05:00,GLV-01,17290000000001002,ถุงมือทำสวนเคลือบยาง,,4,55.00,0.00,220.00,220.00,demo_tiktok_b
