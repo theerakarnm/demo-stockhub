@@ -107,7 +107,7 @@ describe.skipIf(!db)('customer and pricing repositories', () => {
   test('listMatrix lists every active variant and leaves unset tier prices absent', async () => {
     if (!db) return;
     const rows = await pricingRepo.listMatrix(db, { orgId });
-    expect(rows).toHaveLength(18);
+    expect(rows).toHaveLength(19);
     const waterCan = rows.find((row) => row.sku === 'WCN-10L');
     expect(waterCan?.prices[SEED_IDS.priceTiers.dealer]).toBeUndefined();
     expect(waterCan?.prices[SEED_IDS.priceTiers.wholesale]).toBeUndefined();

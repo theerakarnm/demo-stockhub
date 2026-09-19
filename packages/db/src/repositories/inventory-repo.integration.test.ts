@@ -33,10 +33,10 @@ describe.skipIf(!db)('stock overview and movement history', () => {
     if (db) await db.$client.end();
   });
 
-  test('overview returns the 18 seed variants with the hoe FIFO numbers', async () => {
+  test('overview returns the 19 seed variants with the hoe FIFO numbers', async () => {
     if (!db) return;
     const rows = await getStockOverview(db, { orgId, limit: 100 });
-    expect(rows).toHaveLength(18);
+    expect(rows).toHaveLength(19);
     const hoe = rows.find((row) => row.sku === 'HOE-001');
     // 60 @ 12,000 + 40 @ 13,200 satang across the two open lots.
     expect(hoe?.onHand).toBe(100);
@@ -47,13 +47,14 @@ describe.skipIf(!db)('stock overview and movement history', () => {
     expect(bundle?.onHand).toBe(0);
   });
 
-  test('search ปุ๋ย finds exactly the three fertiliser variants', async () => {
+  test('search ปุ๋ย finds exactly the four fertiliser variants', async () => {
     if (!db) return;
     const rows = await getStockOverview(db, { orgId, search: 'ปุ๋ย', limit: 50 });
     expect(rows.map((row) => row.sku).sort()).toEqual([
       'FRT-161616-25',
       'FRT-161616-50',
       'FRT-ORG-25',
+      'FRT-UREA-50',
     ]);
   });
 

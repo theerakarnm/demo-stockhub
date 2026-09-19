@@ -74,6 +74,7 @@ export const SEED_IDS = {
     waterCan: '0e000000-0000-4000-8000-000000000015',
     bundleWater: '0e000000-0000-4000-8000-000000000016',
     bundleMow: '0e000000-0000-4000-8000-000000000017',
+    fertUrea: '0e000000-0000-4000-8000-000000000018',
   },
   variants: {
     hoe: '0f000000-0000-4000-8000-000000000001',
@@ -94,6 +95,7 @@ export const SEED_IDS = {
     waterCan: '0f000000-0000-4000-8000-000000000016',
     bundleWater: '0f000000-0000-4000-8000-000000000017',
     bundleMow: '0f000000-0000-4000-8000-000000000018',
+    fertUrea: '0f000000-0000-4000-8000-000000000019',
   },
   importBatch: '16000000-0000-4000-8000-000000000001',
   priceTiers: {
@@ -335,6 +337,15 @@ export const SEED_PRODUCTS: NewProduct[] = [
     name: 'ชุดเริ่มต้นตัดหญ้า (สินค้าชุด)',
     category: 'สินค้าชุด',
   },
+  // Opens with ZERO stock on purpose. The guided demo receives its two lots on
+  // screen, and those two lots are what produce the 103,400.00 FIFO figure that
+  // fifo.test.ts pins. See docs/demo-walkthrough.md section D.
+  {
+    id: SEED_IDS.products.fertUrea,
+    orgId: SEED_IDS.org,
+    name: 'ปุ๋ยยูเรีย 46-0-0',
+    category: 'ปุ๋ยและยา',
+  },
 ];
 
 /**
@@ -539,6 +550,19 @@ export const SEED_VARIANTS: NewVariant[] = [
     unit: 'ชุด',
     sellingPrice: fromBaht(4790),
     reorderPoint: 0,
+  },
+  {
+    id: SEED_IDS.variants.fertUrea,
+    orgId: SEED_IDS.org,
+    productId: SEED_IDS.products.fertUrea,
+    sku: 'FRT-UREA-50',
+    name: 'ขนาด 50 กก.',
+    kind: 'simple',
+    unit: 'กระสอบ',
+    sellingPrice: fromBaht(1450),
+    // No opening lot, so this variant sits at 0 on hand and below its reorder
+    // point at T0. That is the demo's opening hook: the dashboard says it is out.
+    reorderPoint: 20,
   },
 ];
 
@@ -1186,6 +1210,7 @@ const SEED_SELLING_BAHT: Record<string, number> = {
   [SEED_IDS.variants.fert50]: 980,
   [SEED_IDS.variants.fert25]: 520,
   [SEED_IDS.variants.sprayer]: 890,
+  [SEED_IDS.variants.fertUrea]: 1450,
 };
 
 /** Tier price for one variant: the discounted baht figure, in satang. */
@@ -1208,6 +1233,7 @@ const WHOLESALE_VARIANTS = [
   SEED_IDS.variants.fert50,
   SEED_IDS.variants.fert25,
   SEED_IDS.variants.sprayer,
+  SEED_IDS.variants.fertUrea,
 ] as const;
 
 const DEALER_VARIANTS = [
@@ -1217,6 +1243,7 @@ const DEALER_VARIANTS = [
   SEED_IDS.variants.mower,
   SEED_IDS.variants.fert50,
   SEED_IDS.variants.sprayer,
+  SEED_IDS.variants.fertUrea,
 ] as const;
 
 const seedTierPriceId = (base: string, index: number): string =>

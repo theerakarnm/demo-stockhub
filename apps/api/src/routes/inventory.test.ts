@@ -32,7 +32,7 @@ describe.skipIf(!url)('inventory routes (seeded database)', () => {
 
   test('owner sees the whole catalog with cost fields', async () => {
     const page = await jsonAs<{ items: Row[] }>(app, '/api/v1/inventory', 'owner');
-    expect(page.items).toHaveLength(18);
+    expect(page.items).toHaveLength(19);
     const hoe = page.items.find((row) => row.sku === 'HOE-001');
     expect(hoe?.avgUnitCost).toBeGreaterThan(0);
   });

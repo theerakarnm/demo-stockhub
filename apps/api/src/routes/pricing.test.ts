@@ -89,9 +89,9 @@ describe.skipIf(!url)('pricing routes (seeded database)', () => {
     expect(tiers[0]?.isDefault).toBe(true);
   });
 
-  test('matrix has 18 rows and the seeded hoe wholesale price', async () => {
+  test('matrix has 19 rows and the seeded hoe wholesale price', async () => {
     const matrix = await jsonAs<MatrixWire[]>(app, '/api/v1/price-tiers/matrix', 'owner');
-    expect(matrix).toHaveLength(18);
+    expect(matrix).toHaveLength(19);
     const hoe = matrix.find((row) => row.sku === 'HOE-001');
     expect(hoe?.tierPrices[SEED_IDS.priceTiers.wholesale]).toBe(16_700);
   });

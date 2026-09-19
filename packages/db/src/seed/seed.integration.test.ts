@@ -30,14 +30,14 @@ describe.skipIf(!db)('seeded price tiers and customers', () => {
     expect(rows.find((row) => row.isDefault)?.code).toBe('retail');
   });
 
-  test('seeds 18 tier price rows', async () => {
+  test('seeds 20 tier price rows', async () => {
     if (!db) return;
     const rows = await db.select().from(priceTierPrices);
-    expect(rows).toHaveLength(18);
+    expect(rows).toHaveLength(20);
     expect(rows.filter((row) => row.priceTierId === SEED_IDS.priceTiers.wholesale)).toHaveLength(
-      12,
+      13,
     );
-    expect(rows.filter((row) => row.priceTierId === SEED_IDS.priceTiers.dealer)).toHaveLength(6);
+    expect(rows.filter((row) => row.priceTierId === SEED_IDS.priceTiers.dealer)).toHaveLength(7);
     expect(rows.filter((row) => row.priceTierId === SEED_IDS.priceTiers.retail)).toHaveLength(0);
   });
 

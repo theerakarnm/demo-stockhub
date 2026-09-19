@@ -41,7 +41,12 @@ describe.skipIf(!url)('catalog and listing routes (seeded database)', () => {
       `/api/v1/catalog/search?q=${encodeURIComponent('ปุ๋ย')}`,
       'owner',
     );
-    expect(rows.map((row) => row.sku)).toEqual(['FRT-161616-25', 'FRT-161616-50', 'FRT-ORG-25']);
+    expect(rows.map((row) => row.sku)).toEqual([
+      'FRT-161616-25',
+      'FRT-161616-50',
+      'FRT-ORG-25',
+      'FRT-UREA-50',
+    ]);
     for (const row of rows) expect(typeof row.onHand).toBe('number');
   });
 
