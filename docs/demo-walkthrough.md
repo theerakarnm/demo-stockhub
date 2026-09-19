@@ -1596,6 +1596,13 @@ export ออกทาง `packages/db/src/index.ts` แทนการเพิ
 - ฐานข้อมูลหลักไม่ถูกแตะ ยังเป็น `30 lots / 2822 units / 37924500`
 - ตรวจผ่าน HTTP จริงอีกชั้น: owner ได้ `{"variantCount":19,"lotCount":30,"onHand":2822,"stockValue":37924500}`, stock_staff ได้ผลเดียวกัน **แต่ไม่มีคีย์ `stockValue`**, sales ได้ 403 `Missing permission: stock:adjust`
 
+### งานที่ 11
+
+ไม่มีส่วนต่างจากที่ปรับไว้ในแผนแล้ว
+`resetDemo()` เข้า `api-client.ts` ตั้งแต่งานที่ 7 (แผงต้องใช้), งานนี้จึงเหลือแค่แยก `ResetDemoButton` ออกจากแผง
+พร้อมยืนยันว่า `window.location.reload()` จำเป็นจริง: `use-api.ts` ไม่มี cache invalidation กลาง แผงอยู่ใน layout จึงสั่งให้หน้าอื่นโหลดใหม่ไม่ได้
+`api.resetDemo()` ในโหมด mock (DEMO_MODE เปิด) คืนค่าคงที่ของ T0 ซึ่งใช้ได้เพราะทัวร์บังคับใช้คู่กับ live mode อยู่แล้ว และแผงก็โชว์แถบแดงเตือนเมื่อเปิด mock ค้าง
+
 ---
 
 ## หยุดรออนุมัติ

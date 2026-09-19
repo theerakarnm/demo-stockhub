@@ -18,6 +18,7 @@ import { DEMO_MODE } from '@/lib/config';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { DataFlowCard } from './data-flow-card';
+import { ResetDemoButton } from './reset-demo-button';
 import { useTour } from './tour-provider';
 import { TourSpotlight } from './tour-spotlight';
 import { TOUR_STEPS, stepPathFor } from './tour-steps';
@@ -32,7 +33,6 @@ export function TourPanel() {
   const tour = useTour();
   const router = useRouter();
   const [rawJson, setRawJson] = useState<string | null>(null);
-  const [resetting, setResetting] = useState(false);
   const snapshot = useStepSnapshot();
 
   const state = tour?.state;
@@ -66,21 +66,6 @@ export function TourPanel() {
       setRawJson(String(error));
     }
   }, []);
-
-  const resetDemo = useCallback(async () => {
-    if (!tour) return;
-    if (!window.confirm('ล้างข้อมูลที่สร้างระหว่าง Demo ทั้งหมด แล้วกลับไปจุดเริ่มต้น ใช้เวลาไม่กี่วินาที')) {
-      return;
-    }
-    setResetting(true);
-    try {
-      await api.resetDemo();
-      tour.reset();
-      window.location.reload();
-    } finally {
-      setResetting(false);
-    }
-  }, [tour]);
 
   if (!tour || !state || !step) return null;
 
@@ -219,15 +204,7 @@ export function TourPanel() {
             >
               ข้ามทัวร์
             </button>
-            <button
-              type="button"
-              data-tour-id="reset-demo-button"
-              disabled={resetting}
-              onClick={() => void resetDemo()}
-              className="flex-1 rounded-lg px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
-            >
-              รีเซ็ต Demo
-            </button>
+            <ResetDemoButton onReset={tour.reset} />
           </div>
         </div>
       </aside>
