@@ -311,6 +311,8 @@ describe.skipIf(!url)('import apply - the two lifelines of AGENTS.md rule 6', ()
 
   const RUN2 = Date.now().toString(36);
   const shipRow = `${RUN2}-S01,จัดส่งแล้ว,,2026-02-21 09:00:00,2026-02-21 15:00:00,SPD-001,จอบขุดดิน,ด้ามไม้,2,165.00,0.00,330.00,buyer_s`;
+  /** shipRow's order total in satang (2 x 165.00) - the fee expectation reads it. */
+  const shipGrandTotal = 33_000;
   // Lifeline 2 ships its own order number first, then a later export flips
   // exactly that order to cancelled.
   const shipRow2 = `${RUN2}-S02,จัดส่งแล้ว,,2026-02-22 09:00:00,2026-02-22 15:00:00,SPD-001,จอบขุดดิน,ด้ามไม้,2,165.00,0.00,330.00,buyer_t`;
@@ -359,6 +361,21 @@ describe.skipIf(!url)('import apply - the two lifelines of AGENTS.md rule 6', ()
     // 2 units out of the oldest spade lot at 108.00 baht each.
     expect(first.cogs).toBe(21_600);
     expect(await spadeOnHand()).toBe(before - 2);
+
+    // The fee became a stored fact the moment the import applied (decision D1).
+    // The wire mapping of the fee columns lands in Task L4, so GET /orders/:id
+    // cannot see them yet - read the row through SQL instead.
+    if (!db) return;
+    const externalId = `${RUN2}-S01`;
+    const feeRows = (await db.execute(
+      sql`select platform_fee, fee_source from orders where external_order_id = ${externalId}`,
+    )) as Array<{ platform_fee: string | number; fee_source: string }>;
+    const feeRow = feeRows[0];
+    if (!feeRow) throw new Error('the applied order row is missing');
+    // Shopee default rate is seeded at 1400 bps; roundHalfUp matches Math.round
+    // on an integral product.
+    expect(Number(feeRow.platform_fee)).toBe(Math.round((shipGrandTotal * 1400) / 10_000));
+    expect(feeRow.fee_source).toBe('channel_default');
 
     // The same bytes arrive again in a NEW batch: the checksum warns, the
     // preview moves the order to skipped, and apply moves no stock.

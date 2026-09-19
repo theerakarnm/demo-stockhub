@@ -31,7 +31,11 @@ import {
  *
  * `onConflictDoUpdate` on the unique index is what makes a re-import safe. Note
  * what is NOT updated: created_at and import_batch_id keep pointing at the
- * first file that introduced the order, which keeps the audit trail stable.
+ * first file that introduced the order, which keeps the audit trail stable;
+ * platform_fee and fee_source stay out of the set-list too, so a re-import or
+ * a later channel rate change can never rewrite the fee that was computed when
+ * the order first entered the system (decision D3), and a manual override
+ * always survives a refreshed file.
  */
 export const upsertOrder = async (exec: DbExecutor, values: NewOrder): Promise<Order> => {
   const [row] = await exec

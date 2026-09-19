@@ -366,8 +366,8 @@ Never print or commit `PG_URL`; it stays a shell value.
 Read the channel row once before the loop: `const channels = await channelRepo.listChannels(tx, { orgId });` then `const channel = channels.find((entry) => entry.id === channelId);` and throw the existing `not_found` shape if missing (parity with `channelKindOf` in `apps/api/src/services/order-service.ts:210-221`).
 
 **Steps:**
-- [ ] Step 1: In `applyImport`, after `const channelId = asChannelId(batch.channelId);`, resolve the channel row and keep it.
-- [ ] Step 2: Inside the per-order loop, directly before `orderRepo.upsertOrder`, compute
+- [x] Step 1: In `applyImport`, after `const channelId = asChannelId(batch.channelId);`, resolve the channel row and keep it.
+- [x] Step 2: Inside the per-order loop, directly before `orderRepo.upsertOrder`, compute
       ```ts
       const fee = computePlatformFee({
         channelKind: channel.kind,
@@ -376,10 +376,10 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
       });
       ```
       and pass `platformFee: fee.fee, feeSource: fee.source` into the upsert values.
-- [ ] Step 3: Update the `upsertOrder` doc comment's NOT-updated list to include the fee columns with the D3 rationale.
-- [ ] Step 4: Extend the lifeline describe in `imports.test.ts`: after the first `uploadAndApply`, assert through SQL (the wire mapping of the fee columns lands in Task L4, so `GET /orders/:id` cannot see them yet): `select platform_fee, fee_source from orders where ...` for the applied order must return `platform_fee = Math.round((grandTotal * 1400) / 10000)` and `fee_source = 'channel_default'`, where `grandTotal` is the fixture order total the test already knows. The wire-level assertions (owner sees the fields, sales does not) belong to Task L4 Step 6 and must not be duplicated here.
-- [ ] Step 5: Verify - Run: `DATABASE_URL="$PG_URL" bun test apps/api/src/routes/imports.test.ts && bun run --filter @stockhub/api typecheck && bun run --filter @stockhub/api lint` - Expected: all tests pass (the file's existing count plus the new assertions), 0 fail; typecheck and lint exit 0.
-- [ ] Step 6: Commit - `git commit -m "Charge the channel default fee on imported orders"`
+- [x] Step 3: Update the `upsertOrder` doc comment's NOT-updated list to include the fee columns with the D3 rationale.
+- [x] Step 4: Extend the lifeline describe in `imports.test.ts`: after the first `uploadAndApply`, assert through SQL (the wire mapping of the fee columns lands in Task L4, so `GET /orders/:id` cannot see them yet): `select platform_fee, fee_source from orders where ...` for the applied order must return `platform_fee = Math.round((grandTotal * 1400) / 10000)` and `fee_source = 'channel_default'`, where `grandTotal` is the fixture order total the test already knows. The wire-level assertions (owner sees the fields, sales does not) belong to Task L4 Step 6 and must not be duplicated here.
+- [x] Step 5: Verify - Run: `DATABASE_URL="$PG_URL" bun test apps/api/src/routes/imports.test.ts && bun run --filter @stockhub/api typecheck && bun run --filter @stockhub/api lint` - Expected: all tests pass (the file's existing count plus the new assertions), 0 fail; typecheck and lint exit 0.
+- [x] Step 6: Commit - `git commit -m "Charge the channel default fee on imported orders"`
 
 #### Task L4: Manual fee override on one order
 
