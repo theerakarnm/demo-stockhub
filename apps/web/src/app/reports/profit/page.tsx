@@ -197,9 +197,7 @@ export default function ProfitReportPage() {
                       <span className="align-middle text-slate-900">{row.channelName}</span>
                     </Td>
                     <Td numeric>{qty(row.orders)}</Td>
-                    <Td numeric>
-                      {baht(row.revenue)}
-                    </Td>
+                    <Td numeric>{baht(row.revenue)}</Td>
                     <Td numeric>
                       <CostValue value={row.fee} />
                     </Td>
