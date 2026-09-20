@@ -11,6 +11,7 @@ import { describe, expect, test } from 'bun:test';
 import { buildTestApp, jsonAs } from '../test-utils';
 import { channelsRouter } from './channels';
 
+const url = process.env.DATABASE_URL;
 const app = buildTestApp((v1) => v1.route('/channels', channelsRouter));
 
 interface ChannelWire {
@@ -21,8 +22,11 @@ interface ChannelWire {
   lastImportedAt: string | null;
 }
 
-describe('channels route', () => {
+// Needs the seeded database: without DATABASE_URL the route answers
+// not_implemented, so skip like every other DB-backed suite.
+describe.skipIf(!url)('channels route', () => {
   test('returns the 8 seeded channels with uuid ids and every kind', async () => {
+    if (!url) return;
     const channels = await jsonAs<ChannelWire[]>(app, '/api/v1/channels', 'owner');
 
     expect(channels).toHaveLength(8);
@@ -38,6 +42,7 @@ describe('channels route', () => {
   });
 
   test('shopee main carries the applied seed batch as lastImportedAt', async () => {
+    if (!url) return;
     const channels = await jsonAs<ChannelWire[]>(app, '/api/v1/channels', 'owner');
     const shopeeMain = channels.find((channel) => channel.name === 'Shopee - ร้านหลัก');
     expect(shopeeMain).toBeDefined();
@@ -50,6 +55,7 @@ describe('channels route', () => {
   });
 
   test('sales may list channels but a broken db surfaces as an error envelope', async () => {
+    if (!url) return;
     const channels = await jsonAs<ChannelWire[]>(app, '/api/v1/channels', 'sales');
     expect(channels).toHaveLength(8);
   });
