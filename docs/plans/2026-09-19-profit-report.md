@@ -237,13 +237,14 @@ Never print or commit `PG_URL`; it stays a shell value.
 **Gotcha:** the four baseline-failing tests are NOT broken by this plan and must not be "fixed" here. They fail because bun executes test files concurrently (default `--max-concurrency=20`) and the import suites mutate the shared ledger while the seed-absolute suites read it. Measured evidence: after a fresh `db:seed` the invariant query returns 0 broken rows; `bun test packages/db/src/guards.integration.test.ts` alone right after a full suite fails; `bun test --max-concurrency=1` prints 268 pass / 0 fail.
 
 **Steps:**
-- [ ] Step 1: Change the root script to
+- [x] Step 1: Change the root script to
       ```json
       "test": "bun test --max-concurrency=1",
       ```
       and add one `//`-style reason where the script block allows a comment line above it in the scripts object (JSON has no comments - instead, if `package.json` has no place for the why, note it in the commit body: "DB-backed suites share one Postgres; serialized files keep the seed-absolute assertions deterministic").
-- [ ] Step 2: Verify - Run: `bun run test` twice in a row - Expected: both runs print `268 pass` / `0 fail` (with `DATABASE_URL` unset they print fewer passes and `0 fail` because DB suites skip; run with `.env` present, which `bun test` loads by itself).
-- [ ] Step 3: Commit - `git commit -m "Serialize bun test files for deterministic DB suites"`
+- [x] Step 2: Verify - Run: `bun run test` twice in a row - Expected: both runs print `268 pass` / `0 fail` (with `DATABASE_URL` unset they print fewer passes and `0 fail` because DB suites skip; run with `.env` present, which `bun test` loads by itself).
+- [x] Step 3: Commit - `git commit -m "Serialize bun test files for deterministic DB suites"`
+  > Orchestrator note: these three ticks were silently reverted when Task L1's commit staged a stale plan-file copy (caught by the finish-phase whole-file audit; commit `9880fbe` and its double-run 268/0 verify were real and already reviewed).
 
 #### Task L1: Fee source enum, order fee columns, channel rate, migration
 
@@ -657,7 +658,7 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
 
 Run on the merged branch with the shared database freshly seeded, `wrangler dev --port 8788` for the API and `next dev --port 3100` for the web (`bun run dev:api -- --port 8788` equivalent or `cd apps/api && bunx wrangler dev --port 8788`).
 
-- [ ] Run: reseed first - `DATABASE_URL="$PG_URL" bun run db:migrate && DATABASE_URL="$PG_URL" bun run db:seed` - Expected: "Seed complete".
+- [x] Run: reseed first - `DATABASE_URL="$PG_URL" bun run db:migrate && DATABASE_URL="$PG_URL" bun run db:seed` - Expected: "Seed complete".
 - [x] Run: import + apply the Lazada fixture as manager -
   > Deviation (run 2026-09-19): apply refused with `unmatched_sku` for `SICKLE-01` / `GLOVE-M` / `SPRAY-16L` - the wave-2 C flow requires matching before confirm, which the step did not spell out. Resolved via `POST /imports/:id/match` (SICKLE-01 -> KNF-001, GLOVE-M -> GLV-01, SPRAY-16L -> SPR-16L), then apply returned `{ "movementsCreated": 1, "ordersApplied": 4, "cogs": 12000 }` - movementsCreated 1 equals the fixture's single `delivered` row (`ready_to_ship` does not deduct by design), matching the preview's sold-line count.
       `curl -s -X POST localhost:8788/api/v1/imports -H 'x-demo-role: manager' -F "file=@packages/adapters/fixtures/lazada-orders.sample.csv"` then `curl -s -X POST localhost:8788/api/v1/imports/<id>/apply -H 'x-demo-role: manager'` - Expected: apply returns 200 with `movementsCreated` equal to the matched sold-line count the preview's `willDeduct` group showed, and a `cogs` value present.
