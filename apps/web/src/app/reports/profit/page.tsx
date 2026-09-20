@@ -198,7 +198,7 @@ export default function ProfitReportPage() {
                     </Td>
                     <Td numeric>{qty(row.orders)}</Td>
                     <Td numeric>
-                      <CostValue value={row.revenue} />
+                      {baht(row.revenue)}
                     </Td>
                     <Td numeric>
                       <CostValue value={row.fee} />
