@@ -606,7 +606,7 @@ export const listProfitOrders = async (
       unitsSold: sql<number>`coalesce((select sum(-m2.qty_delta) from stock_movements m2
         where m2.order_id = ${orders.id} and m2.reason = 'sale_out'), 0)::int`.as('units_sold'),
       soldCost: sql<number>`coalesce((select sum(m2.cost_total) from stock_movements m2
-        where m2.order_id = ${orders.id} and m2.reason = 'sale_out'), 0)::int`.as('sold_cost'),
+        where m2.order_id = ${orders.id} and m2.reason = 'sale_out'), 0)::bigint`.as('sold_cost'),
       // NO minus on qty_delta here: return_in / cancel_restore are inbound, so
       // the ledger already stores them positive.
       restoredUnits: sql<number>`coalesce((select sum(m2.qty_delta) from stock_movements m2
@@ -614,7 +614,7 @@ export const listProfitOrders = async (
           and m2.reason in ('return_in', 'cancel_restore')), 0)::int`.as('restored_units'),
       restoredCost: sql<number>`coalesce((select sum(m2.cost_total) from stock_movements m2
         where m2.order_id = ${orders.id}
-          and m2.reason in ('return_in', 'cancel_restore')), 0)::int`.as('restored_cost'),
+          and m2.reason in ('return_in', 'cancel_restore')), 0)::bigint`.as('restored_cost'),
     })
     .from(orders)
     .innerJoin(channels, eq(channels.id, orders.channelId))
