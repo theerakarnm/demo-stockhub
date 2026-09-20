@@ -11,7 +11,7 @@
     "build": "bun run --filter '*' build",
     "typecheck": "bun run --filter '*' typecheck",
     "lint": "bun run --filter '*' lint",
-    "test": "bun test",
+    "test": "bun test --max-concurrency=1",
     "db:generate": "bun run --filter @stockhub/db generate",
     "db:migrate": "bun run --filter @stockhub/db migrate",
     "db:push": "bun run --filter @stockhub/db push",

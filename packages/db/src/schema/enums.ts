@@ -16,6 +16,7 @@
 
 import type {
   ChannelKind,
+  FeeSource,
   ImportStatus,
   MatchSource,
   MovementReason,
@@ -75,6 +76,13 @@ export const matchSourceEnum = pgEnum('match_source', [
   'unmatched',
 ]);
 
+export const feeSourceEnum = pgEnum('fee_source', [
+  'none',
+  'manual',
+  'channel_default',
+  'exported',
+]);
+
 export const variantKindEnum = pgEnum('variant_kind', ['simple', 'bundle']);
 
 /** true only when A and B are exactly the same union. */
@@ -92,5 +100,6 @@ export const ENUM_SYNC_GUARD = {
   orderStatus: true as SameUnion<(typeof orderStatusEnum.enumValues)[number], OrderStatus>,
   importStatus: true as SameUnion<(typeof importStatusEnum.enumValues)[number], ImportStatus>,
   matchSource: true as SameUnion<(typeof matchSourceEnum.enumValues)[number], MatchSource>,
+  feeSource: true as SameUnion<(typeof feeSourceEnum.enumValues)[number], FeeSource>,
   variantKind: true as SameUnion<(typeof variantKindEnum.enumValues)[number], VariantKind>,
 } as const;

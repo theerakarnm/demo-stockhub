@@ -16,4 +16,4 @@ export * from './services/stock/bundle';
 export * from './services/stock/movement';
 export * from './services/pricing/resolve-price';
 export * from './services/stock/order-transition';
-export * from './services/pricing/resolve-price';
+export * from './services/profit/fee';

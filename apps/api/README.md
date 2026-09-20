@@ -132,6 +132,7 @@ Tier fields (`priceTierId`, `priceTierCode`, `priceTierName`, `tierPrices`, `pri
 | `GET /api/v1/reports/channel-sales?days=` | `order:read` | query: `days` 1-365, default 7 | `ChannelSalesRow[]` |
 | `GET /api/v1/reports/variance?days=` | `stock:read` | query: `days` 1-365, default 7 | `VarianceRow[]` |
 | `GET /api/v1/reports/cogs?from=&to=` | `cost:read` | query: `from`, `to` dates, `channelId` optional | `CogsReportRow[]`, 403 without `cost:read` |
+| `GET /api/v1/reports/profit?from=&to=` | `cost:read` | query: `from`, `to` dates, `channelId` optional, `limit` 1-1000 default 200 | `ProfitReport`, 403 without `cost:read` |
 
 ## Error contract
 

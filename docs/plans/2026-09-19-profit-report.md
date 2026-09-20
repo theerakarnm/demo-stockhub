@@ -202,7 +202,9 @@ Never print or commit `PG_URL`; it stays a shell value.
 ### PERISHABLE - recapture before task L0
 
 - [Podman machine and the Postgres container are up] - Check: `podman ps --format '{{.Names}} {{.Status}}' | grep stockhub-postgres && pg_isready -h localhost -p 5435` - Needed by: Tasks L1, L3, L4, L5, L6 and end-to-end. If down: `podman machine start && podman start stockhub-postgres`.
+  > Deviation (2026-09-19, run start): another agent session was concurrently executing its own plan against the shared `stockhub-postgres` (5435) and its seed TRUNCATE cycles corrupted DB-backed verifies both ways. With the user's approval this run now owns a PRIVATE database: container `stockhub-postgres-profit` (same image postgres:16-alpine, same creds, host port 5436), and this checkout's `.env` + `apps/api/.dev.vars` were repointed 5435 -> 5436. The shared 5435 container is untouched. All DB commands in this plan now resolve to 5436 through the same files, so no command changes. Ownership proof: migrate + seed green, `pg_stat_activity` shows only this run's connections.
 - [`.env` carries a local DATABASE_URL] - Check: `grep -c '^DATABASE_URL=postgresql://localhost:5435/' .env` prints `1` (shape check only, never print the value) - Needed by: everything above.
+  > Deviation: the grep prints `0` because the real URL carries credentials before the host (`postgresql://***@localhost:5435/stockhub`, masked). The substance holds - exactly one `DATABASE_URL` line, host `localhost:5435`, db `stockhub` - and `db:migrate` + `db:seed` ran green against it. Re-verified 2026-09-19 at the start of this run.
 - [The shared `stockhub` database is migrated and freshly seeded] - Check: `DATABASE_URL="$PG_URL" bun run db:migrate && DATABASE_URL="$PG_URL" bun run db:seed` ends with "Seed complete"; measured output: 30 lots, 2822 units, stock value 379,245 baht, 4 orders / 7 lines - Needed by: all DB verifies. Re-seed also between experiments; the seed is idempotent (TRUNCATE list in `packages/db/src/seed/index.ts:54-72`).
 - [Baseline counts at `83d899a`, before Task L0] - Check: `bun run typecheck` (all 6 packages exit 0, measured), `bun run lint` (all green, measured), `bun test` (measured NON-DETERMINISTIC: 264-266 pass with 2-4 fail - the failing tests are `guards.integration.test.ts` "keeps the seed invariant", `routes/inventory.test.ts` "movements list returns the seed ledger", `routes/inventory-write.test.ts` "manager receives 5 pairs", `repositories/inventory-repo.integration.test.ts` "hoe history shows the running balance"; all four are DB suites racing the mutating import suite) - Needed by: Task L0's verify. After Task L0: `bun run test` prints `268 pass, 0 fail` deterministically (measured twice with `--max-concurrency=1`).
 - [Dependencies installed in THIS checkout] - Check: `test -d node_modules && bun run typecheck` exits 0 - Needed by: every task.
@@ -272,7 +274,7 @@ Never print or commit `PG_URL`; it stays a shell value.
 **Rollback:** the migration is additive. To reverse on a dev database: `DROP COLUMN` the two order columns and the channel column, `DROP TYPE fee_source`, delete the generated `0003_*` files and the journal entry. Nothing backfills data, so nothing else rewinds.
 
 **Steps:**
-- [ ] Step 1: In `packages/core/src/domain/enums.ts` append
+- [x] Step 1: In `packages/core/src/domain/enums.ts` append
       ```ts
       /** Where an order's platform fee came from. Stored per order; never recomputed. */
       export const FEE_SOURCES = [
@@ -283,8 +285,8 @@ Never print or commit `PG_URL`; it stays a shell value.
       ] as const;
       export type FeeSource = (typeof FEE_SOURCES)[number];
       ```
-- [ ] Step 2: Mirror in `packages/db/src/schema/enums.ts` (import type, `feeSourceEnum`, `ENUM_SYNC_GUARD.feeSource`).
-- [ ] Step 3: In `packages/db/src/schema/orders.ts` add after `grandTotal`
+- [x] Step 2: Mirror in `packages/db/src/schema/enums.ts` (import type, `feeSourceEnum`, `ENUM_SYNC_GUARD.feeSource`).
+- [x] Step 3: In `packages/db/src/schema/orders.ts` add after `grandTotal`
       ```ts
       /** Platform commission + payment fee actually charged, in satang. Written once at
        *  entry; a re-import or rate change never rewrites it (see upsertOrder). */
@@ -293,20 +295,21 @@ Never print or commit `PG_URL`; it stays a shell value.
       feeSource: feeSourceEnum('fee_source').notNull().default('none'),
       ```
       and a `check('orders_platform_fee_nonneg', sql`${table.platformFee} >= 0`)` next to `orders_grand_total_nonneg` (`packages/db/src/schema/orders.ts:78`).
-- [ ] Step 4: In `packages/db/src/schema/channels.ts` add
+- [x] Step 4: In `packages/db/src/schema/channels.ts` add
       ```ts
       /** Default marketplace commission in basis points (1400 = 14.00%). 0 for own channels. */
       feeRateBps: integer('fee_rate_bps').notNull().default(0),
       ```
       plus `check('channels_fee_rate_bps_range', sql`${table.feeRateBps} >= 0 AND ${table.feeRateBps} <= 10000`)`; import `integer` and `sql` if missing.
-- [ ] Step 5: Generate and read the migration: `cd packages/db && DATABASE_URL="$PG_URL" bunx drizzle-kit generate --name platform_fees` - Expected: the SQL contains `CREATE TYPE "fee_source"`, two `ALTER TABLE "orders" ADD COLUMN`, one `ALTER TABLE "channels" ADD COLUMN`, exactly two `ADD CONSTRAINT ... CHECK` (the two this task writes; `money()` adds no constraint), and no `DROP`.
-- [ ] Step 6: Seed the demo rates on the six marketplace channels in `SEED_CHANNELS` (`shopeeMain`/`shopeeBranch` `feeRateBps: 1400`, `lazadaMain`/`lazadaMall` `1300`, `tiktokMain`/`tiktokLive` `1200`), each line annotated
+- [x] Step 5: Generate and read the migration: `cd packages/db && DATABASE_URL="$PG_URL" bunx drizzle-kit generate --name platform_fees` - Expected: the SQL contains `CREATE TYPE "fee_source"`, two `ALTER TABLE "orders" ADD COLUMN`, one `ALTER TABLE "channels" ADD COLUMN`, exactly two `ADD CONSTRAINT ... CHECK` (the two this task writes; `money()` adds no constraint), and no `DROP`.
+  > Deviation: the Expected string `CREATE TYPE "fee_source"` appears namespaced as `CREATE TYPE "public"."fee_source"` in the generated SQL; same statement, all other Expected conditions hold exactly.
+- [x] Step 6: Seed the demo rates on the six marketplace channels in `SEED_CHANNELS` (`shopeeMain`/`shopeeBranch` `feeRateBps: 1400`, `lazadaMain`/`lazadaMall` `1300`, `tiktokMain`/`tiktokLive` `1200`), each line annotated
       ```ts
       // VERIFY: guessed demo rate, check against the customer's real commission schedule.
       ```
       POS / wholesale / manual channels stay on the 0 default.
-- [ ] Step 7: Verify - Run: `DATABASE_URL="$PG_URL" bun run db:migrate && DATABASE_URL="$PG_URL" bun run db:seed` - Expected: both exit 0, seed prints "Seed complete"; then `cd packages/db && DATABASE_URL="$PG_URL" bunx drizzle-kit generate --name noop` prints "No schema changes, nothing to migrate"; then `bun run typecheck` exits 0 in all packages.
-- [ ] Step 8: Commit - `git commit -m "Add platform fee columns and fee source enum"`
+- [x] Step 7: Verify - Run: `DATABASE_URL="$PG_URL" bun run db:migrate && DATABASE_URL="$PG_URL" bun run db:seed` - Expected: both exit 0, seed prints "Seed complete"; then `cd packages/db && DATABASE_URL="$PG_URL" bunx drizzle-kit generate --name noop` prints "No schema changes, nothing to migrate"; then `bun run typecheck` exits 0 in all packages.
+- [x] Step 8: Commit - `git commit -m "Add platform fee columns and fee source enum"`
 
 #### Task L2: Core fee + profit math, pure and tested
 
@@ -327,7 +330,7 @@ Never print or commit `PG_URL`; it stays a shell value.
   Semantics (decision D4): marketplace kinds are exactly `IMPORTABLE_CHANNEL_KINDS`; the fee is `roundHalfUp(grandTotal * feeRateBps / 10000)` with source `channel_default`, or `0` / `none` for own channels. `orderProfit`: `netUnits = unitsSold - restoredUnits`; `netUnits <= 0` returns all zeros; otherwise `revenue = roundHalfUp(grandTotal * netUnits / unitsSold)`, `fee = roundHalfUp(platformFee * netUnits / unitsSold)`, `cogs = soldCost - restoredCost`, `profit = revenue - fee - cogs`.
 
 **Steps:**
-- [ ] Step 1: Implement `fee.ts`. Keep it free of every framework import. Guard `unitsSold <= 0` defensively (the SQL in L5 only returns orders with a sale, so this is a stop-gap, not a contract).
+- [x] Step 1: Implement `fee.ts`. Keep it free of every framework import. Guard `unitsSold <= 0` defensively (the SQL in L5 only returns orders with a sale, so this is a stop-gap, not a contract).
       ```ts
       const roundHalfUp = (value: number): number => Math.floor(value + 0.5);
 
@@ -343,10 +346,11 @@ Never print or commit `PG_URL`; it stays a shell value.
         return { fee, source: 'channel_default' };
       };
       ```
-- [ ] Step 2: Implement `orderProfit` in the same file with the exact semantics above; every division runs through `roundHalfUp` exactly once.
-- [ ] Step 3: Tests (pure, no DB): Shopee 1400 bps over 50500 gives `{ fee: 7070, source: 'channel_default' }`; rounding case grandTotal 333 at 1400 bps gives 47; `pos` gives `{ fee: 0, source: 'none' }`; TikTok with rate 0 gives fee 0 with source `channel_default`; `orderProfit` full sale (3 sold, 24000 cost, grandTotal 50000, fee 7000) gives profit 19000; partial return of 1 of 3 gives revenue 33333, fee 4667, cogs 16000, profit 12666; full return gives all zeros; a restoredCost above soldCost is impossible by construction, assert the function still never returns a negative cogs input pass-through (feeding restoredCost 24000 / soldCost 24000 with netUnits 0 gives zeros).
-- [ ] Step 4: Verify - Run: `bun test packages/core/src/services/profit/fee.test.ts && bun run --filter @stockhub/core typecheck && bun run --filter @stockhub/core lint` - Expected: 8 pass, 0 fail; typecheck and lint exit 0.
-- [ ] Step 5: Commit - `git commit -m "Add platform fee and order profit rules"`
+  > Deviation: `Satang` is a branded type, so the reference code's raw-number returns do not typecheck; `roundHalfUp` now constructs through `satang()` and the no-fee branch returns `ZERO` from domain/money. While appending the new export in index.ts, also removed the duplicated `export * from './services/pricing/resolve-price'` line (no-op duplicate).
+- [x] Step 2: Implement `orderProfit` in the same file with the exact semantics above; every division runs through `roundHalfUp` exactly once.
+- [x] Step 3: Tests (pure, no DB): Shopee 1400 bps over 50500 gives `{ fee: 7070, source: 'channel_default' }`; rounding case grandTotal 333 at 1400 bps gives 47; `pos` gives `{ fee: 0, source: 'none' }`; TikTok with rate 0 gives fee 0 with source `channel_default`; `orderProfit` full sale (3 sold, 24000 cost, grandTotal 50000, fee 7000) gives profit 19000; partial return of 1 of 3 gives revenue 33333, fee 4667, cogs 16000, profit 12666; full return gives all zeros; a restoredCost above soldCost is impossible by construction, assert the function still never returns a negative cogs input pass-through (feeding restoredCost 24000 / soldCost 24000 with netUnits 0 gives zeros).
+- [x] Step 4: Verify - Run: `bun test packages/core/src/services/profit/fee.test.ts && bun run --filter @stockhub/core typecheck && bun run --filter @stockhub/core lint` - Expected: 8 pass, 0 fail; typecheck and lint exit 0.
+- [x] Step 5: Commit - `git commit -m "Add platform fee and order profit rules"`
 
 #### Task L3: Write the fee when an import applies
 
@@ -362,8 +366,8 @@ Never print or commit `PG_URL`; it stays a shell value.
 Read the channel row once before the loop: `const channels = await channelRepo.listChannels(tx, { orgId });` then `const channel = channels.find((entry) => entry.id === channelId);` and throw the existing `not_found` shape if missing (parity with `channelKindOf` in `apps/api/src/services/order-service.ts:210-221`).
 
 **Steps:**
-- [ ] Step 1: In `applyImport`, after `const channelId = asChannelId(batch.channelId);`, resolve the channel row and keep it.
-- [ ] Step 2: Inside the per-order loop, directly before `orderRepo.upsertOrder`, compute
+- [x] Step 1: In `applyImport`, after `const channelId = asChannelId(batch.channelId);`, resolve the channel row and keep it.
+- [x] Step 2: Inside the per-order loop, directly before `orderRepo.upsertOrder`, compute
       ```ts
       const fee = computePlatformFee({
         channelKind: channel.kind,
@@ -372,10 +376,10 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
       });
       ```
       and pass `platformFee: fee.fee, feeSource: fee.source` into the upsert values.
-- [ ] Step 3: Update the `upsertOrder` doc comment's NOT-updated list to include the fee columns with the D3 rationale.
-- [ ] Step 4: Extend the lifeline describe in `imports.test.ts`: after the first `uploadAndApply`, assert through SQL (the wire mapping of the fee columns lands in Task L4, so `GET /orders/:id` cannot see them yet): `select platform_fee, fee_source from orders where ...` for the applied order must return `platform_fee = Math.round((grandTotal * 1400) / 10000)` and `fee_source = 'channel_default'`, where `grandTotal` is the fixture order total the test already knows. The wire-level assertions (owner sees the fields, sales does not) belong to Task L4 Step 6 and must not be duplicated here.
-- [ ] Step 5: Verify - Run: `DATABASE_URL="$PG_URL" bun test apps/api/src/routes/imports.test.ts && bun run --filter @stockhub/api typecheck && bun run --filter @stockhub/api lint` - Expected: all tests pass (the file's existing count plus the new assertions), 0 fail; typecheck and lint exit 0.
-- [ ] Step 6: Commit - `git commit -m "Charge the channel default fee on imported orders"`
+- [x] Step 3: Update the `upsertOrder` doc comment's NOT-updated list to include the fee columns with the D3 rationale.
+- [x] Step 4: Extend the lifeline describe in `imports.test.ts`: after the first `uploadAndApply`, assert through SQL (the wire mapping of the fee columns lands in Task L4, so `GET /orders/:id` cannot see them yet): `select platform_fee, fee_source from orders where ...` for the applied order must return `platform_fee = Math.round((grandTotal * 1400) / 10000)` and `fee_source = 'channel_default'`, where `grandTotal` is the fixture order total the test already knows. The wire-level assertions (owner sees the fields, sales does not) belong to Task L4 Step 6 and must not be duplicated here.
+- [x] Step 5: Verify - Run: `DATABASE_URL="$PG_URL" bun test apps/api/src/routes/imports.test.ts && bun run --filter @stockhub/api typecheck && bun run --filter @stockhub/api lint` - Expected: all tests pass (the file's existing count plus the new assertions), 0 fail; typecheck and lint exit 0.
+- [x] Step 6: Commit - `git commit -m "Charge the channel default fee on imported orders"`
 
 #### Task L4: Manual fee override on one order
 
@@ -412,13 +416,13 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
       to the object literal next to `grandTotal`. The new fields flow through `redactMiddleware` automatically because Task L4 puts their keys in `COST_KEYS` - the route test asserts the sales-side absence to prove it. (2) `FeeSource` reaches `contract.ts` as `import type { FeeSource } from '@stockhub/core'` - the types file already re-exports core types this way. (3) The zod body must bound the value: `z.object({ fee: z.number().int().nonnegative().max(1_000_000_000) })` (satang; the cap is a sanity rail at 10 million baht, not a business rule).
 
 **Steps:**
-- [ ] Step 1: Repo `setOrderFee` mirroring `setOrderStatus`: select the row `for('update')`, throw `not_found` when missing, then
+- [x] Step 1: Repo `setOrderFee` mirroring `setOrderStatus`: select the row `for('update')`, throw `not_found` when missing, then
       ```ts
       await exec.update(orders).set({ platformFee: params.fee, feeSource: params.source, updatedAt: new Date() }).where(and(eq(orders.orgId, params.orgId), eq(orders.id, params.orderId)));
       ```
-- [ ] Step 2: Schema `setOrderFeeBody` in `apps/api/src/schemas/orders.ts`.
-- [ ] Step 3: Service `setOrderFee`: transaction -> repo with `source: 'manual'` -> return `getOrder(ctx, orderId)` so the caller sees fresh `cogs` / `margin` / `platformFee` together.
-- [ ] Step 4: Route
+- [x] Step 2: Schema `setOrderFeeBody` in `apps/api/src/schemas/orders.ts`.
+- [x] Step 3: Service `setOrderFee`: transaction -> repo with `source: 'manual'` -> return `getOrder(ctx, orderId)` so the caller sees fresh `cogs` / `margin` / `platformFee` together.
+- [x] Step 4: Route
       ```ts
       .patch(
         '/:id/fee',
@@ -429,10 +433,11 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
       )
       ```
       matching the mount style of the existing `.post` handlers.
-- [ ] Step 5: Contract edit (Order fields above) in the same commit as its COST_KEYS registration: add `'fee'`, `'platformFee'` and `'feeSource'` to the `COST_KEYS` set literal in `packages/core/src/rbac.ts` (anchor: the `'grossProfit'` line inside `COST_KEYS`, ~L110). Both new fields carry the marker, so the reverse audit stays green in this commit and Task L6 only reuses keys that are already registered. Expected: contract audit 3 tests pass in this task's verify.
-- [ ] Step 6: Tests in `orders.test.ts`: manager PATCHes `{ fee: 3500 }` on a bill -> 200, response carries `platformFee 3500`, `feeSource 'manual'`; sales PATCHes -> 403 (no `cost:write`); owner GET -> `platformFee` present; sales GET -> neither `platformFee` nor `feeSource` in the JSON.
-- [ ] Step 7: Verify - Run: `DATABASE_URL="$PG_URL" bun test apps/api/src/routes/orders.test.ts apps/api/src/contract-audit.test.ts && bun run --filter @stockhub/api typecheck && bun run --filter @stockhub/api lint && bun run --filter @stockhub/core typecheck` - Expected: new tests pass, contract audit 3 pass, 0 fail anywhere; all typechecks exit 0.
-- [ ] Step 8: Commit - `git commit -m "Add manual platform fee override"`
+- [x] Step 5: Contract edit (Order fields above) in the same commit as its COST_KEYS registration: add `'fee'`, `'platformFee'` and `'feeSource'` to the `COST_KEYS` set literal in `packages/core/src/rbac.ts` (anchor: the `'grossProfit'` line inside `COST_KEYS`, ~L110). Both new fields carry the marker, so the reverse audit stays green in this commit and Task L6 only reuses keys that are already registered. Expected: contract audit 3 tests pass in this task's verify.
+- [x] Step 6: Tests in `orders.test.ts`: manager PATCHes `{ fee: 3500 }` on a bill -> 200, response carries `platformFee 3500`, `feeSource 'manual'`; sales PATCHes -> 403 (no `cost:write`); owner GET -> `platformFee` present; sales GET -> neither `platformFee` nor `feeSource` in the JSON.
+- [x] Step 7: Verify - Run: `DATABASE_URL="$PG_URL" bun test apps/api/src/routes/orders.test.ts apps/api/src/contract-audit.test.ts && bun run --filter @stockhub/api typecheck && bun run --filter @stockhub/api lint && bun run --filter @stockhub/core typecheck` - Expected: new tests pass, contract audit 3 pass, 0 fail anywhere; all typechecks exit 0.
+- [x] Step 8: Commit - `git commit -m "Add manual platform fee override"`
+  > Orchestrator note: ticked by the reviewing orchestrator - commit `5fb3296` verified on the branch (the executor missed the box, the commit itself landed and was verified: subject, staged files incl. the plan, tree clean).
 
 #### Task L5: Profit read model in the movement repo
 
@@ -459,7 +464,7 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
 **Gotcha:** copied verbatim from the `listCogsByDayChannel` header comment - inside subqueries, bare `order_id` correlates to the inner table, so every outer reference stays table-qualified. Sum columns of `bigint` come back as strings; map with `Number()` like `listCogsByDayChannel` does. Cap the query with `limit 10_000` as a runaway guard; L6's schema bounds the window to 366 days so the cap is unreachable in practice.
 
 **Steps:**
-- [ ] Step 1: Implement with one select: `orders o` inner-join a `sale_out` aggregate subquery, left-join a restore aggregate subquery, inner-join `channels` for name/kind, `where(and(eq(orders.orgId, ...), gte(orders.orderedAt, from), lt(orders.orderedAt, to), channelId ? eq(...) : undefined))`, `orderBy(desc(orders.orderedAt), asc(orders.id))`, `limit(10_000)`.
+- [x] Step 1: Implement with one select: `orders o` inner-join a `sale_out` aggregate subquery, left-join a restore aggregate subquery, inner-join `channels` for name/kind, `where(and(eq(orders.orgId, ...), gte(orders.orderedAt, from), lt(orders.orderedAt, to), channelId ? eq(...) : undefined))`, `orderBy(desc(orders.orderedAt), asc(orders.id))`, `limit(10_000)`.
       ```ts
       const saleAgg = db.$with('') // not needed - use raw sql subqueries per the listCogsByDayChannel style
       ```
@@ -469,9 +474,14 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
         where m2.order_id = ${orders.id} and m2.reason = 'sale_out'), 0)::int`.as('sold_cost'),
       ```
       and the same shape for `unitsSold` (`sum(-m2.qty_delta)` over `sale_out`) and for `restoredUnits` (`sum(m2.qty_delta)`, NO minus sign - restores are inbound) and `restoredCost` (`sum(m2.cost_total)`) over `reason in ('return_in','cancel_restore')`. Simpler and index-friendlier alternative that stays within the file's conventions: explicit `sql` subselects per column group as above - do NOT introduce a `with()` CTE style the file has never used.
-- [ ] Step 2: Integration test, all inside `inRollback`: insert one order (fixed uuid, `channelId` shopeeMain, `grandTotal` 50500, `platformFee` 7070, `feeSource` 'channel_default', `status` 'delivered', `orderedAt` now) plus one `sale_out` movement (qtyDelta -3, costTotal 24000) and one `return_in` movement (qtyDelta +1, costTotal 8000 - restores are inbound, positive) for the same order; assert the row comes back with `unitsSold 3`, `soldCost 24000`, `restoredUnits 1`, `restoredCost 8000`; a second order without movements must NOT appear; the `channelId` filter must drop the row when set to `pos`.
-- [ ] Step 3: Verify - Run: `DATABASE_URL="$PG_URL" bun test packages/db/src/repositories/movement-repo.integration.test.ts && bun run --filter @stockhub/db typecheck` - Expected: 3 pass, 0 fail; typecheck exit 0; the rollback left the seed untouched (`bun test packages/db/src/guards.integration.test.ts` still passes).
-- [ ] Step 4: Commit - `git commit -m "Add per-order profit read model"`
+      > Deviation: the sale_out filter required by the row semantics ("only orders with at
+      > least one `sale_out` movement") is implemented as an `exists (select 1 from
+      > stock_movements m1 where m1.order_id = ${orders.id} and m1.reason = 'sale_out')`
+      > condition inside the `and(...)` where list, keeping the raw-`sql` style; the step's
+      > where sketch did not list it.
+- [x] Step 2: Integration test, all inside `inRollback`: insert one order (fixed uuid, `channelId` shopeeMain, `grandTotal` 50500, `platformFee` 7070, `feeSource` 'channel_default', `status` 'delivered', `orderedAt` now) plus one `sale_out` movement (qtyDelta -3, costTotal 24000) and one `return_in` movement (qtyDelta +1, costTotal 8000 - restores are inbound, positive) for the same order; assert the row comes back with `unitsSold 3`, `soldCost 24000`, `restoredUnits 1`, `restoredCost 8000`; a second order without movements must NOT appear; the `channelId` filter must drop the row when set to `pos`.
+- [x] Step 3: Verify - Run: `DATABASE_URL="$PG_URL" bun test packages/db/src/repositories/movement-repo.integration.test.ts && bun run --filter @stockhub/db typecheck` - Expected: 3 pass, 0 fail; typecheck exit 0; the rollback left the seed untouched (`bun test packages/db/src/guards.integration.test.ts` still passes).
+- [x] Step 4: Commit - `git commit -m "Add per-order profit read model"`
 
 #### Task L6: Serve GET /reports/profit
 
@@ -524,7 +534,7 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
 **Gotcha:** the profit endpoint response is built per-role by `ok()`'s redaction like every other route, but the route ALSO 403s for roles without `cost:read`, so stripping never fires in practice - exactly the COGS report's situation, and for the same reason ("a stripped profit report would be an empty table").
 
 **Steps:**
-- [ ] Step 1: Schema. `cogsReportQuery` is a `ZodEffects` (`z.object(...).refine(...)`, `apps/api/src/schemas/reports.ts:26-33`) and zod 3 has no `.extend` on it, so restate the object:
+- [x] Step 1: Schema. `cogsReportQuery` is a `ZodEffects` (`z.object(...).refine(...)`, `apps/api/src/schemas/reports.ts:26-33`) and zod 3 has no `.extend` on it, so restate the object:
       ```ts
       export const profitQuery = z
         .object({
@@ -541,14 +551,22 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
       export type ProfitQuery = z.infer<typeof profitQuery>;
       ```
       (`idString` is already imported in this file.)
-- [ ] Step 2: Service `getProfitReport`: build `fromAt` / `toAt` exactly like `getCogsReport` (Bangkok midnights, `to` exclusive after +1 day); call `listProfitOrders`; map each row through `orderProfit({ grandTotal: satang(row.grandTotal), platformFee: satang(row.platformFee), unitsSold: row.unitsSold, soldCost: row.soldCost, restoredUnits: row.restoredUnits, restoredCost: row.restoredCost })`; assemble `rows` (first `limit`), then `channelRows` by grouping the FULL mapped set with a `Map<channelId, ChannelProfitRow>` summed field by field, sorted by profit desc; `totals` by summing the full set; `ordersInWindow` = full length. Keep every integer a `Satang`/number - no floats anywhere.
-- [ ] Step 3: Route entry copying the COGS entry's shape with `validate('query', profitQuery)`.
-- [ ] Step 4: Contract types with every marker exactly as in Interfaces; import `FeeSource` type from core.
-- [ ] Step 5: `leak-scan.test.ts`: append `'/api/v1/reports/profit?from=2025-01-01&to=2025-01-31'` to `LEAK_SCAN_DB_PATHS`. Honest note: the scan only walks `LEAK_SCAN_ROLES` (`sales`, `stock_staff`, `apps/api/src/leak-scan.test.ts:45`) and this route answers both with 403, so the appended path scans no body and documents intent only - the real redaction coverage for this feature is Step 6's route tests plus the Task L4 orders assertions.
-- [ ] Step 6: `reports.test.ts`: inside the existing fixture machinery (the setup transaction that already creates a sale for the water-can), add one shopee-shaped order + `sale_out` movement (reuse the fixture's insertion helpers; if the fixtures live in the setup test's transaction, extend it in place), then a new `describe` that asserts as `owner`: 200; the order row's `profit === revenue - fee - cogs` identity; the fixture order appears with `feeSource` from its stored fee; `channelRows` contains its channel with summed profit; `totals` equals the sum of channelRows; as `sales` and as `stock_staff`: 403 with the standard error envelope code `forbidden`.
-- [ ] Step 7: README row: `| `GET /api/v1/reports/profit?from=&to=` | `cost:read` | query: `from`, `to` dates, `channelId` optional, `limit` 1-1000 default 200 | `ProfitReport`, 403 without `cost:read` |`.
-- [ ] Step 8: Verify - Run: `DATABASE_URL="$PG_URL" bun test apps/api/src/routes/reports.test.ts apps/api/src/leak-scan.test.ts apps/api/src/contract-audit.test.ts && bun run --filter @stockhub/api typecheck && bun run --filter @stockhub/api lint` - Expected: all pass, 0 fail; typecheck and lint exit 0.
-- [ ] Step 9: Commit - `git commit -m "Serve the profit report from the ledger"`
+- [x] Step 2: Service `getProfitReport`: build `fromAt` / `toAt` exactly like `getCogsReport` (Bangkok midnights, `to` exclusive after +1 day); call `listProfitOrders`; map each row through `orderProfit({ grandTotal: satang(row.grandTotal), platformFee: satang(row.platformFee), unitsSold: row.unitsSold, soldCost: row.soldCost, restoredUnits: row.restoredUnits, restoredCost: row.restoredCost })`; assemble `rows` (first `limit`), then `channelRows` by grouping the FULL mapped set with a `Map<channelId, ChannelProfitRow>` summed field by field, sorted by profit desc; `totals` by summing the full set; `ordersInWindow` = full length. Keep every integer a `Satang`/number - no floats anywhere.
+- [x] Step 3: Route entry copying the COGS entry's shape with `validate('query', profitQuery)`.
+      > Deviation: the route file's header comment said "COGS is the one endpoint where
+      > the whole response is cost data"; with a second such endpoint it was reworded to
+      > cover both, keeping the comment truthful.
+- [x] Step 4: Contract types with every marker exactly as in Interfaces; import `FeeSource` type from core.
+- [x] Step 5: `leak-scan.test.ts`: append `'/api/v1/reports/profit?from=2025-01-01&to=2025-01-31'` to `LEAK_SCAN_DB_PATHS`. Honest note: the scan only walks `LEAK_SCAN_ROLES` (`sales`, `stock_staff`, `apps/api/src/leak-scan.test.ts:45`) and this route answers both with 403, so the appended path scans no body and documents intent only - the real redaction coverage for this feature is Step 6's route tests plus the Task L4 orders assertions.
+- [x] Step 6: `reports.test.ts`: inside the existing fixture machinery (the setup transaction that already creates a sale for the water-can), add one shopee-shaped order + `sale_out` movement (reuse the fixture's insertion helpers; if the fixtures live in the setup test's transaction, extend it in place), then a new `describe` that asserts as `owner`: 200; the order row's `profit === revenue - fee - cogs` identity; the fixture order appears with `feeSource` from its stored fee; `channelRows` contains its channel with summed profit; `totals` equals the sum of channelRows; as `sales` and as `stock_staff`: 403 with the standard error envelope code `forbidden`.
+      > Deviation: the fixture order (ORD-5) needed its own INSERT statement - Postgres
+      > multi-row VALUES lists require equal-length tuples and the pre-fee shared insert
+      > has 8 columns. ORD-5's `ordered_at` / movement `occurred_at` sit 2 days back so
+      > the today-only dashboard buckets are untouched; this left every pre-existing
+      > assertion in the file valid unchanged (verified: 19/19 in reports.test.ts).
+- [x] Step 7: README row: `| `GET /api/v1/reports/profit?from=&to=` | `cost:read` | query: `from`, `to` dates, `channelId` optional, `limit` 1-1000 default 200 | `ProfitReport`, 403 without `cost:read` |`.
+- [x] Step 8: Verify - Run: `DATABASE_URL="$PG_URL" bun test apps/api/src/routes/reports.test.ts apps/api/src/leak-scan.test.ts apps/api/src/contract-audit.test.ts && bun run --filter @stockhub/api typecheck && bun run --filter @stockhub/api lint` - Expected: all pass, 0 fail; typecheck and lint exit 0.
+- [x] Step 9: Commit - `git commit -m "Serve the profit report from the ledger"`
 
 #### Task L7: Web client layer for profit + fee
 
@@ -575,12 +593,16 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
 **Gotcha:** the order mirror in `apps/web/src/lib/api-types.ts` is named `Order` (~L399), so `setOrderFee` returns `Promise<Order>` - keep that name. `mock-data.ts` is the only file with fake data and it must keep running the same role stripping as the real backend (`mock-data.ts:1-12` header). Build `mockApi.profitReport` from the existing MOCK order rows so the demo toggles roles correctly, and make `setOrderFee` mutate the mock order in place like the other mock mutations do.
 
 **Steps:**
-- [ ] Step 1: Mirror the three report types + `FeeSource` + the two Order fields (`platformFee`, `feeSource`) into `api-types.ts`, keeping the file's `MoneyAmount` naming and the `cost-gated` comment style used by `Order.cogs`.
-- [ ] Step 2: `api-client.ts`: add `getProfitReport` right after `getCogsReport` (demo/real pair, same shape) and `setOrderFee` next to `cancelOrder` (demo echo + real PATCH).
-- [ ] Step 3: `mock-data.ts`: `mockApi.profitReport(query)` (a flat sibling of `mockApi.cogsReport`; there is no `reports` grouping in `mock-data.ts`) filters a small in-file `MOCK_PROFIT_ORDERS` array (4 orders across shopee + pos, one fully returned) by the window and channel, computes `channelRows` + `totals` with the same identity `profit = revenue - fee - cogs`, caps rows at `limit ?? 200`; `setOrderFee` sets `platformFee` and `feeSource: 'manual'` on the mock order and returns it.
-- [ ] Step 4: `api-profit.test.ts` (pure): totals equal the summed rows; the fully returned order contributes all zeros; the channel filter drops other channels; `setOrderFee` echoes `feeSource 'manual'`.
-- [ ] Step 5: Verify - Run: `bun test apps/web/src/lib/api-profit.test.ts && bun run --filter @stockhub/web typecheck && bun run --filter @stockhub/web lint` - Expected: 4 pass, 0 fail; typecheck and lint exit 0.
-- [ ] Step 6: Commit - `git commit -m "Add web profit report and fee client"`
+- [x] Step 1: Mirror the three report types + `FeeSource` + the two Order fields (`platformFee`, `feeSource`) into `api-types.ts`, keeping the file's `MoneyAmount` naming and the `cost-gated` comment style used by `Order.cogs`.
+- [x] Step 2: `api-client.ts`: add `getProfitReport` right after `getCogsReport` (demo/real pair, same shape) and `setOrderFee` next to `cancelOrder` (demo echo + real PATCH).
+  > Deviation: the plan's `getProfitReport(query: ProfitQuery = {})` default value cannot typecheck - `ProfitQuery.from`/`to` are required strings (as the same Produces block states), so TS2739 rejects `= {}`. Dropped the default on both the client method and `mockApi.profitReport`; the signature is otherwise identical.
+- [x] Step 3: `mock-data.ts`: `mockApi.profitReport(query)` (a flat sibling of `mockApi.cogsReport`; there is no `reports` grouping in `mock-data.ts`) filters a small in-file `MOCK_PROFIT_ORDERS` array (4 orders across shopee + pos, one fully returned) by the window and channel, computes `channelRows` + `totals` with the same identity `profit = revenue - fee - cogs`, caps rows at `limit ?? 200`; `setOrderFee` sets `platformFee` and `feeSource: 'manual'` on the mock order and returns it.
+  > Deviation (logged 2026-09-19 by the finish review): the mock builds a standalone `PROFIT_SEED` / `MOCK_PROFIT_ORDERS` array instead of deriving rows from `mockOrders` - the seeded demo bills carry no ledger costs, so a derived report would render nothing. Coherence fixes from the finish review: `setOrderFee` now writes through to BOTH stores, and the fixture fees use the seeded 1400 bps Shopee rate instead of an invented 3%.
+- [x] Step 4: `api-profit.test.ts` (pure): totals equal the summed rows; the fully returned order contributes all zeros; the channel filter drops other channels; `setOrderFee` echoes `feeSource 'manual'`.
+- [x] Step 5: Verify - Run: `bun test apps/web/src/lib/api-profit.test.ts && bun run --filter @stockhub/web typecheck && bun run --filter @stockhub/web lint` - Expected: 4 pass, 0 fail; typecheck and lint exit 0.
+  > Ran 2026-09-19: `4 pass, 0 fail, 25 expect() calls`; `@stockhub/web typecheck: Exited with code 0`; `@stockhub/web lint: Exited with code 0`.
+- [x] Step 6: Commit - `git commit -m "Add web profit report and fee client"`
+  > Orchestrator note: ticked by the reviewing orchestrator - commit `72ade43` verified on the branch (executor missed the box; commit subject, staged plan file and tree state all verified).
 
 #### Task L8: /reports/profit screen + sidebar entry
 
@@ -594,8 +616,8 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
 **Gotcha:** the existing `/reports/cogs` entry carries `match: ['/reports']`, so once a second item lives under `/reports` both entries would highlight together. Narrow the cogs entry to `match: ['/reports/cogs']` in the same commit and give the new entry `match: ['/reports/profit']`.
 
 **Steps:**
-- [ ] Step 1: Page structure, mirroring the COGS page: gate on `hasPermission('cost:read')` and render the locked note instead of fetching when absent; from/to date inputs defaulting to the last 30 days (`defaultRange()` pattern); optional channel `Select` fed by `api.getChannels()`; per-channel section as `StatCard`s or a compact table (orders, revenue, fee, cogs, profit, all money through `<CostValue>`); per-order table (date, external id, channel badge, status badge, units, revenue, fee, cogs, profit) with `<CostValue>` on fee/cogs/profit; a totals footer row; loading `TableSkeleton`, `EmptyState` ("ยังไม่มีออเดอร์ที่ตัดสต็อกในช่วงนี้"), `ErrorState` with retry; a small footnote "ค่าธรรมเนียมเป็นค่าที่ตั้งไว้ต่อช่องทาง แก้ได้ที่หน้าออเดอร์" explaining fee provenance.
-- [ ] Step 2: Sidebar: insert after the cogs entry
+- [x] Step 1: Page structure, mirroring the COGS page: gate on `hasPermission('cost:read')` and render the locked note instead of fetching when absent; from/to date inputs defaulting to the last 30 days (`defaultRange()` pattern); optional channel `Select` fed by `api.getChannels()`; per-channel section as `StatCard`s or a compact table (orders, revenue, fee, cogs, profit, all money through `<CostValue>`); per-order table (date, external id, channel badge, status badge, units, revenue, fee, cogs, profit) with `<CostValue>` on fee/cogs/profit; a totals footer row; loading `TableSkeleton`, `EmptyState` ("ยังไม่มีออเดอร์ที่ตัดสต็อกในช่วงนี้"), `ErrorState` with retry; a small footnote "ค่าธรรมเนียมเป็นค่าที่ตั้งไว้ต่อช่องทาง แก้ได้ที่หน้าออเดอร์" explaining fee provenance.
+- [x] Step 2: Sidebar: insert after the cogs entry
       ```ts
       {
         href: '/reports/profit',
@@ -606,8 +628,9 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
       },
       ```
       and change the cogs entry's `match` to `['/reports/cogs']`.
-- [ ] Step 3: Verify - Run: `bun run --filter @stockhub/web typecheck && bun run --filter @stockhub/web lint && grep -c "MOCK" apps/web/src/app/reports/profit/page.tsx` - Expected: typecheck and lint exit 0; grep prints 0 (the page never imports mock data directly).
-- [ ] Step 4: Commit - `git commit -m "Add profit report screen"`
+- [x] Step 3: Verify - Run: `bun run --filter @stockhub/web typecheck && bun run --filter @stockhub/web lint && grep -c "MOCK" apps/web/src/app/reports/profit/page.tsx` - Expected: typecheck and lint exit 0; grep prints 0 (the page never imports mock data directly).
+  > Ran 2026-09-19: typecheck `Exited with code 0`; lint `Exited with code 0`; grep printed `0` (grep then exits 1 on zero matches, so the chain stops there - no MOCK string exists in the page).
+- [x] Step 4: Commit - `git commit -m "Add profit report screen"`
 
 #### Task L9: Fee override control on the order detail page
 
@@ -618,11 +641,12 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
 - Consumes: `api.setOrderFee` (L7), `order.platformFee` / `order.feeSource` (L7 mirror), `useRole().hasPermission('cost:write')`, the existing dialog + `useMutation` patterns on the page (`cancel`, `doReturn` at ~L253-254).
 
 **Steps:**
-- [ ] Step 1: In the cost area of the page (next to the existing COGS `CostValue`), render for roles WITH `cost:write` a "ค่าธรรมเนียมแพลตฟอร์ม" row: the fee via `<CostValue>`, the source as Thai text (`'none'` -> "ไม่มี", `'manual'` -> "ตั้งเอง", `'channel_default'` -> "ตามช่องทางขาย", `'exported'` -> "จากแพลตฟอร์ม"), and a small "แก้ไข" `Button` opening a `Dialog` with one baht `Input` (convert with the file's existing money helpers: display `baht(order.platformFee)`, submit `Math.round(Number(value) * 100)`), plus roles WITHOUT `cost:write` see nothing new (the existing `cost:read` stripping already hides the numbers).
-- [ ] Step 2: Submit through `useMutation((fee: number) => api.setOrderFee(orderId, fee))`, on success refresh the order query (the hook pattern the cancel flow already uses) and close the dialog; keep loading / error states on the dialog submit button like the cancel dialog.
-- [ ] Step 3: Verify - Run: `bun run --filter @stockhub/web typecheck && bun run --filter @stockhub/web lint` - Expected: both exit 0.
-- [ ] Step 4: Verify - Manual: start the API only (`cd apps/api && bun run dev`), then as manager `curl -X PATCH localhost:8787/api/v1/orders/<billId>/fee -H 'content-type: application/json' -H 'x-demo-role: manager' -d '{"fee":3500}'` - Expected: HTTP 200 and `"feeSource":"manual"` in the JSON; repeat with `-H 'x-demo-role: sales'` - Expected: HTTP 403. (`<billId>`: create a bill first via `POST /api/v1/orders` or reuse one from the seeded data - a pending seed order is fine, fees are status-independent.)
-- [ ] Step 5: Commit - `git commit -m "Add fee override to the order page"`
+- [x] Step 1: In the cost area of the page (next to the existing COGS `CostValue`), render for roles WITH `cost:write` a "ค่าธรรมเนียมแพลตฟอร์ม" row: the fee via `<CostValue>`, the source as Thai text (`'none'` -> "ไม่มี", `'manual'` -> "ตั้งเอง", `'channel_default'` -> "ตามช่องทางขาย", `'exported'` -> "จากแพลตฟอร์ม"), and a small "แก้ไข" `Button` opening a `Dialog` with one baht `Input` (convert with the file's existing money helpers: display `baht(order.platformFee)`, submit `Math.round(Number(value) * 100)`), plus roles WITHOUT `cost:write` see nothing new (the existing `cost:read` stripping already hides the numbers).
+  > Deviation: submit parses the baht input after stripping locale commas (`value.replace(/[,\\s]/g, '')` before `Number()`), because the dialog seeds the field with `money()` ("1,250.50"); raw `Number()` on the seeded string is `NaN` and would leave the prefilled submit button disabled. The satang conversion stays `Math.round(x * 100)`.
+- [x] Step 2: Submit through `useMutation((fee: number) => api.setOrderFee(orderId, fee))`, on success refresh the order query (the hook pattern the cancel flow already uses) and close the dialog; keep loading / error states on the dialog submit button like the cancel dialog.
+- [x] Step 3: Verify - Run: `bun run --filter @stockhub/web typecheck && bun run --filter @stockhub/web lint` - Expected: both exit 0.
+- [x] Step 4: Verify - Manual: start the API only (`cd apps/api && bun run dev`), then as manager `curl -X PATCH localhost:8787/api/v1/orders/<billId>/fee -H 'content-type: application/json' -H 'x-demo-role: manager' -d '{"fee":3500}'` - Expected: HTTP 200 and `"feeSource":"manual"` in the JSON; repeat with `-H 'x-demo-role: sales'` - Expected: HTTP 403. (`<billId>`: create a bill first via `POST /api/v1/orders` or reuse one from the seeded data - a pending seed order is fine, fees are status-independent.)
+- [x] Step 5: Commit - `git commit -m "Add fee override to the order page"`
 
 ## Failure handling summary
 
@@ -634,20 +658,26 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
 Run on the merged branch with the shared database freshly seeded, `wrangler dev --port 8788` for the API and `next dev --port 3100` for the web (`bun run dev:api -- --port 8788` equivalent or `cd apps/api && bunx wrangler dev --port 8788`).
 
 - [ ] Run: reseed first - `DATABASE_URL="$PG_URL" bun run db:migrate && DATABASE_URL="$PG_URL" bun run db:seed` - Expected: "Seed complete".
-- [ ] Run: import + apply the Lazada fixture as manager -
+- [x] Run: import + apply the Lazada fixture as manager -
+  > Deviation (run 2026-09-19): apply refused with `unmatched_sku` for `SICKLE-01` / `GLOVE-M` / `SPRAY-16L` - the wave-2 C flow requires matching before confirm, which the step did not spell out. Resolved via `POST /imports/:id/match` (SICKLE-01 -> KNF-001, GLOVE-M -> GLV-01, SPRAY-16L -> SPR-16L), then apply returned `{ "movementsCreated": 1, "ordersApplied": 4, "cogs": 12000 }` - movementsCreated 1 equals the fixture's single `delivered` row (`ready_to_ship` does not deduct by design), matching the preview's sold-line count.
       `curl -s -X POST localhost:8788/api/v1/imports -H 'x-demo-role: manager' -F "file=@packages/adapters/fixtures/lazada-orders.sample.csv"` then `curl -s -X POST localhost:8788/api/v1/imports/<id>/apply -H 'x-demo-role: manager'` - Expected: apply returns 200 with `movementsCreated` equal to the matched sold-line count the preview's `willDeduct` group showed, and a `cogs` value present.
-- [ ] Run: open one POS bill as sales -
+- [x] Run: open one POS bill as sales -
+  > Deviation (run 2026-09-19): the 201 response as `sales` does NOT carry `platformFee` / `feeSource` - `ok()` strips cost fields for roles without `cost:read`, which is the E behavior this plan builds on; the step's Expected only holds for a cost-reading role. Verified: `GET /orders/:id` as manager shows `platformFee 0` / `feeSource none`; the same GET as sales has neither key. Bill `POS-20260920-5929` created, grandTotal 100000.
       `curl -s -X POST localhost:8788/api/v1/orders -H 'x-demo-role: sales' -H 'content-type: application/json' -d '{"channelKind":"pos","lines":[{"variantId":"'"$(psql "$PG_URL" -Atc "select id from variants where sku='HAT-01'")"'","quantity":2,"unitPrice":50000}]}'` - Expected: 201; the response's `platformFee` is `0` and `feeSource` is `'none'`.
-- [ ] Run: override the fee on that bill as manager -
+- [x] Run: override the fee on that bill as manager -
       `curl -s -X PATCH localhost:8788/api/v1/orders/<billOrderId>/fee -H 'x-demo-role: manager' -H 'content-type: application/json' -d '{"fee":3500}'` - Expected: 200, `"feeSource":"manual"`, `"platformFee":3500`.
-- [ ] Run: the report over the fixture's own window, role owner - the imported Lazada orders carry the FILE's order dates, and `applyImport` stores `orderedAt` from the file (`apps/api/src/services/import-service.ts:676`). `orderedAt` comes from `createTime` (`packages/adapters/src/lazada/columns.ts:20`), which spans 2026-02-14 10:05 to 2026-02-15 21:14; 02-16 appears only in `updateTime`. The window below is [Feb 14 00:00, Feb 17 00:00) Bangkok time and therefore covers every row - do not "tighten" `to` to 02-15, it would silently drop the 21:14 order:
+- [x] Run: the report over the fixture's own window, role owner - the imported Lazada orders carry the FILE's order dates, and `applyImport` stores `orderedAt` from the file (`apps/api/src/services/import-service.ts:676`). `orderedAt` comes from `createTime` (`packages/adapters/src/lazada/columns.ts:20`), which spans 2026-02-14 10:05 to 2026-02-15 21:14; 02-16 appears only in `updateTime`. The window below is [Feb 14 00:00, Feb 17 00:00) Bangkok time and therefore covers every row - do not "tighten" `to` to 02-15, it would silently drop the 21:14 order:
       `curl -s "localhost:8788/api/v1/reports/profit?from=2026-02-14&to=2026-02-16" -H 'x-demo-role: owner'` - Expected: HTTP 200; the applied Lazada orders appear with `feeSource` `channel_default` and `fee` equal to the round-half-up of `grandTotal * 1300 / 10000` (integer math, identical to `computePlatformFee`; do not express this as a float multiply) per row; every row satisfies `profit === revenue - fee - cogs`; `totals.profit` equals the sum of `channelRows[].profit`.
-- [ ] Run: the report over today, role owner - `TODAY=$(TZ=Asia/Bangkok date +%F); curl -s "localhost:8788/api/v1/reports/profit?from=$TODAY&to=$TODAY" -H 'x-demo-role: owner'` - Expected: the POS bill row appears with `fee 3500`, `feeSource manual`, and the same profit identity; `ordersInWindow` counts exactly the orders with sold units today (the bill only, until other journeys sell).
-- [ ] Run: the report, restricted roles - the same curl with `-H 'x-demo-role: sales'` and with `-H 'x-demo-role: stock_staff'` - Expected: both HTTP 403 with `{"error":{"code":"forbidden"...}}`; `GET /orders/<billOrderId>` as sales contains neither `platformFee` nor `feeSource`.
-- [ ] Manual: in the browser as owner open `http://localhost:3100/reports/profit` - Expected: per-channel cards + per-order table render with Thai labels, the POS bill shows the manual fee of 35.00 baht, switching the range to last month shows the empty state.
-- [ ] Manual: switch the role switcher to พนักงานขาย - Expected: "รายงานกำไร" disappears from the sidebar (the nav item is permission-gated) and the order detail page shows no fee row.
-- [ ] 👤 Human: view `/reports/profit` and the order detail fee dialog as เจ้าของกิจการ and judge the layout against the rest of the app - Expected: the two new money columns read clearly and the dialog matches the app's existing dialogs - Proxy: the owner-payload curl above plus `bun run --filter @stockhub/web typecheck && bun run --filter @stockhub/web lint` prove everything except the visual judgement.
-- [ ] Run: full gate - `bun run typecheck && bun run lint && bun run test` - Expected: typecheck 6 packages exit 0, lint green, `268 + (new tests) pass, 0 fail`.
+- [x] Run: the report over today, role owner - `TODAY=$(TZ=Asia/Bangkok date +%F); curl -s "localhost:8788/api/v1/reports/profit?from=$TODAY&to=$TODAY" -H 'x-demo-role: owner'` - Expected: the POS bill row appears with `fee 3500`, `feeSource manual`, and the same profit identity; `ordersInWindow` counts exactly the orders with sold units today (the bill only, until other journeys sell).
+- [x] Run: the report, restricted roles - the same curl with `-H 'x-demo-role: sales'` and with `-H 'x-demo-role: stock_staff'` - Expected: both HTTP 403 with `{"error":{"code":"forbidden"...}}`; `GET /orders/<billOrderId>` as sales contains neither `platformFee` nor `feeSource`.
+- [x] Manual: in the browser as owner open `http://localhost:3100/reports/profit` - Expected:
+  > Deviation (run 2026-09-19): driven with Playwright headless Chromium instead of a hand-driven browser. Ports moved: API on 8791 (8788 is occupied by another session's dev server), web on 3000 (`apps/api/.dev.vars` CORS allow-list only knows `http://localhost:3000`; on 3100 every fetch was CORS-blocked). Also the web must run with `NEXT_PUBLIC_DEMO_MODE=false NEXT_PUBLIC_API_URL=http://localhost:8791` or the page silently renders mock data. All Expected conditions confirmed on the real UI: Thai headings/labels, per-channel and per-order tables, POS bill fee ฿35.00 with source label ตั้งเอง on the order detail, and the August window renders the ยังไม่มีออเดอร์ที่ตัดสต็อกในช่วงนี้ empty state. Screenshots: /tmp/e2e_s8_data_state.png, /tmp/e2e_s8_owner_profit.png, /tmp/e2e_s8_owner_order_detail.png. per-channel cards + per-order table render with Thai labels, the POS bill shows the manual fee of 35.00 baht, switching the range to last month shows the empty state.
+- [x] Manual: switch the role switcher to พนักงานขาย - Expected:
+  > Run note (2026-09-19): verified via Playwright with the role persisted the same way the switcher stores it (`localStorage stockhub.demo.role = sales`); sidebar has no `/reports/profit` link, the report renders no data table, and the order detail page shows no fee row. "รายงานกำไร" disappears from the sidebar (the nav item is permission-gated) and the order detail page shows no fee row.
+- [ ] 👤 Human: view `/reports/profit` and the order detail fee dialog as เจ้าของกิจการ
+  > Proxy result (2026-09-19): screenshots captured for the human's judgement - /tmp/e2e_s8_data_state.png and /tmp/e2e_s8_owner_order_detail.png show the report tables and the fee dialog entry point; `bun run --filter @stockhub/web typecheck && bun run --filter @stockhub/web lint` both exit 0. and judge the layout against the rest of the app - Expected: the two new money columns read clearly and the dialog matches the app's existing dialogs - Proxy: the owner-payload curl above plus `bun run --filter @stockhub/web typecheck && bun run --filter @stockhub/web lint` prove everything except the visual judgement.
+- [x] Run: full gate - `bun run typecheck && bun run lint && bun run test` - Expected: typecheck 6 packages exit 0, lint green, `268 + (new tests) pass, 0 fail`.
+  > Run result (2026-09-19): typecheck 6/6, lint 6/6 (one biome format fix in `packages/db/src/schema/channels.ts` - an L1 line exceeded print width, fixed with `biome check --write`), test **289 pass / 0 fail** on a freshly reseeded private DB (the E2E steps mutate the seed by design; the plan's preflight requires reseeding between phases).
 
 ## Review log
 

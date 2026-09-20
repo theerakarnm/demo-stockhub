@@ -35,6 +35,7 @@ import {
   asOrderId,
   asVariantId,
   asWarehouseId,
+  computePlatformFee,
   expandBundles,
   importObjectKey,
   matchSku,
@@ -612,6 +613,13 @@ export const applyImport = async (
       throw new StockHubError('conflict', 'แฟ้มนี้ยังไม่ผูกกับช่องทางขาย', { batchId });
     }
     const channelId = asChannelId(batch.channelId);
+    // One read for the whole batch: every order in the file shares the batch's
+    // channel, and the fee needs that channel's default rate (decision D1).
+    const channels = await channelRepo.listChannels(tx, { orgId });
+    const channel = channels.find((entry) => entry.id === channelId);
+    if (!channel) {
+      throw new StockHubError('not_found', `Channel ${channelId} not found`, { channelId });
+    }
 
     // 2. All-or-nothing gate: an unmatched SKU blocks the whole batch unless
     //    the caller explicitly leaves those orders for later.
@@ -668,6 +676,15 @@ export const applyImport = async (
 
       // 3b. Upsert is idempotent on (channelId, externalOrderId): a repeated
       //     file refreshes the row and keeps the first import's audit trail.
+      //     The fee is decided once, here, when the order enters the system
+      //     (decision D1): the channel's default rate is baked into a stored
+      //     fact that a later re-import never recomputes (decision D3), and
+      //     the decision sits in the API service layer, never in an adapter.
+      const fee = computePlatformFee({
+        channelKind: channel.kind,
+        feeRateBps: channel.feeRateBps,
+        grandTotal: satang(order.grandTotal),
+      });
       const savedOrder = await orderRepo.upsertOrder(tx, {
         orgId,
         channelId,
@@ -678,6 +695,8 @@ export const applyImport = async (
         cancelledAt: order.status === 'cancelled' || order.status === 'returned' ? now : null,
         buyerName: order.buyerName ?? null,
         grandTotal: order.grandTotal,
+        platformFee: fee.fee,
+        feeSource: fee.source,
         importBatchId: batchId,
         raw: { source: 'import', importBatchId: batchId },
       });

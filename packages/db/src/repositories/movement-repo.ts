@@ -7,9 +7,13 @@
  */
 
 import {
+  type ChannelId,
+  type ChannelKind,
+  type FeeSource,
   type LotConsumption,
   MOVEMENT_REASONS,
   type MovementReason,
+  type OrderStatus,
   type OrgId,
   type PlannedMovement,
   type UserId,
@@ -18,7 +22,7 @@ import {
   asVariantId,
   satang,
 } from '@stockhub/core';
-import { and, asc, desc, eq, gte, inArray, lte, notInArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lt, lte, notInArray, sql } from 'drizzle-orm';
 import type { DbExecutor } from '../client';
 import {
   type channels,
@@ -575,5 +579,97 @@ export const listCogsByDayChannel = async (
     unitsSold: Number(row.units_sold),
     revenue: Number(row.revenue),
     cogs: Number(row.cogs),
+  }));
+};
+
+export interface ProfitLedgerRow {
+  orderId: string;
+  externalOrderId: string;
+  status: OrderStatus;
+  orderedAt: Date;
+  channelId: string;
+  channelName: string;
+  channelKind: ChannelKind;
+  /** Sum of line totals after discount, in satang. */
+  grandTotal: number;
+  /** Platform fee stored on the order at entry, in satang. Never recomputed here. */
+  platformFee: number;
+  feeSource: FeeSource;
+  /** Sum of -qty_delta over the order's sale_out rows: outbound is negative. */
+  unitsSold: number;
+  /** Sum of cost_total over the order's sale_out rows, in satang. */
+  soldCost: number;
+  /** Sum of qty_delta over return_in / cancel_restore rows: restores are inbound, so positive. */
+  restoredUnits: number;
+  /** Sum of cost_total over return_in / cancel_restore rows, in satang. */
+  restoredCost: number;
+}
+
+/**
+ * Per-order profit read model: one row per order whose ledger holds a sale_out.
+ *
+ * Same correlated-scalar-subquery style as listCogsByDayChannel: inside a
+ * subquery a bare order_id would bind to the INNER stock_movements table, so
+ * every outer reference goes through the drizzle column object, which renders
+ * table-qualified. The signs are the ledger's, not new math: sale_out rows
+ * carry negative qty_delta and the restore reasons carry positive ones, so
+ * only unitsSold flips the sign. Postgres sum() is bigint, which drivers hand
+ * back as strings; the ::int casts plus the Number() mapping below keep the
+ * row numeric.
+ */
+export const listProfitOrders = async (
+  exec: DbExecutor,
+  params: { orgId: OrgId; from: Date; to: Date; channelId?: ChannelId },
+): Promise<ProfitLedgerRow[]> => {
+  const rows = await exec
+    .select({
+      orderId: orders.id,
+      externalOrderId: orders.externalOrderId,
+      status: orders.status,
+      orderedAt: orders.orderedAt,
+      channelId: orders.channelId,
+      channelName: channels.name,
+      channelKind: channels.kind,
+      grandTotal: orders.grandTotal,
+      platformFee: orders.platformFee,
+      feeSource: orders.feeSource,
+      unitsSold: sql<number>`coalesce((select sum(-m2.qty_delta) from stock_movements m2
+        where m2.order_id = ${orders.id} and m2.reason = 'sale_out'), 0)::int`.as('units_sold'),
+      soldCost: sql<number>`coalesce((select sum(m2.cost_total) from stock_movements m2
+        where m2.order_id = ${orders.id} and m2.reason = 'sale_out'), 0)::bigint`.as('sold_cost'),
+      // NO minus on qty_delta here: return_in / cancel_restore are inbound, so
+      // the ledger already stores them positive.
+      restoredUnits: sql<number>`coalesce((select sum(m2.qty_delta) from stock_movements m2
+        where m2.order_id = ${orders.id}
+          and m2.reason in ('return_in', 'cancel_restore')), 0)::int`.as('restored_units'),
+      restoredCost: sql<number>`coalesce((select sum(m2.cost_total) from stock_movements m2
+        where m2.order_id = ${orders.id}
+          and m2.reason in ('return_in', 'cancel_restore')), 0)::bigint`.as('restored_cost'),
+    })
+    .from(orders)
+    .innerJoin(channels, eq(channels.id, orders.channelId))
+    .where(
+      and(
+        eq(orders.orgId, params.orgId),
+        gte(orders.orderedAt, params.from),
+        // Exclusive upper bound, mirroring getCogsReport: callers pass from
+        // midnight of to+1 day, so a window never counts a day twice.
+        lt(orders.orderedAt, params.to),
+        params.channelId ? eq(orders.channelId, params.channelId) : undefined,
+        // An order that never shipped has no ledger to read profit from.
+        sql`exists (select 1 from stock_movements m1
+          where m1.order_id = ${orders.id} and m1.reason = 'sale_out')`,
+      ),
+    )
+    .orderBy(desc(orders.orderedAt), asc(orders.id))
+    // Runaway guard; the report route bounds the window to 366 days, so the
+    // cap stays unreachable in practice.
+    .limit(10_000);
+  return rows.map((row) => ({
+    ...row,
+    unitsSold: Number(row.unitsSold),
+    soldCost: Number(row.soldCost),
+    restoredUnits: Number(row.restoredUnits),
+    restoredCost: Number(row.restoredCost),
   }));
 };

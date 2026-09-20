@@ -9,6 +9,7 @@
 
 import type {
   ChannelKind,
+  FeeSource,
   ImportStatus,
   MatchSource,
   MovementReason,
@@ -203,6 +204,10 @@ export interface Order {
   cogs?: MoneyOnWire;
   /** cost field */
   margin?: MoneyOnWire;
+  /** cost field */
+  platformFee?: MoneyOnWire;
+  /** cost field */
+  feeSource?: FeeSource;
   orderedAt: string;
   lines: OrderLine[];
 }
@@ -346,6 +351,70 @@ export interface CogsReport {
     cogs?: MoneyOnWire;
     /** cost field */
     margin?: MoneyOnWire;
+  };
+}
+
+/** One order's profit line in GET /reports/profit: ledger sums plus fee math. */
+export interface ProfitOrderRow {
+  id: string;
+  externalOrderId: string;
+  channelId: string;
+  channelName: string;
+  channelKind: ChannelKind;
+  status: OrderStatus;
+  orderedAt: string;
+  unitsSold: number;
+  unitsReturned: number;
+  revenue: MoneyOnWire;
+  /** cost field */
+  fee?: MoneyOnWire;
+  /** cost field */
+  cogs?: MoneyOnWire;
+  /** cost field */
+  profit?: MoneyOnWire;
+  /** cost field */
+  feeSource?: FeeSource;
+}
+
+/** One channel's profit summed over the whole report window. */
+export interface ChannelProfitRow {
+  channelId: string;
+  channelName: string;
+  channelKind: ChannelKind;
+  orders: number;
+  unitsSold: number;
+  unitsReturned: number;
+  revenue: MoneyOnWire;
+  /** cost field */
+  fee?: MoneyOnWire;
+  /** cost field */
+  cogs?: MoneyOnWire;
+  /** cost field */
+  profit?: MoneyOnWire;
+}
+
+export interface ProfitReport {
+  from: string;
+  to: string;
+  channelId?: string;
+  /** Untruncated order count for the window. */
+  ordersInWindow: number;
+  /** Newest first, capped at the query's `limit`. */
+  rows: ProfitOrderRow[];
+  /** Biggest profit first; covers the whole window, never just `rows`. */
+  channelRows: ChannelProfitRow[];
+  /** Covers the whole window, never just the returned page. */
+  totals: {
+    orders: number;
+    unitsSold: number;
+    unitsReturned: number;
+    revenue: MoneyOnWire;
+    /** cost field */
+    fee?: MoneyOnWire;
+    /** cost field */
+    cogs?: MoneyOnWire;
+    /** cost field */
+    profit?: MoneyOnWire;
   };
 }
 

@@ -33,6 +33,8 @@ import type {
   Order,
   OrdersQuery,
   OrdersResponse,
+  ProfitQuery,
+  ProfitReportResponse,
   ReceiveStockInput,
   ReturnOrderLineInput,
   VarianceQuery,
@@ -207,6 +209,17 @@ export const api = {
         }),
     ),
 
+  /** PATCH /api/v1/orders/:id/fee - writes the fee a person typed; needs cost:write. */
+  setOrderFee: (orderId: string, fee: number): Promise<Order> =>
+    demo(
+      () => mockApi.setOrderFee(orderId, fee),
+      () =>
+        request<Order>(`/api/v1/orders/${encodeURIComponent(orderId)}/fee`, {
+          method: 'PATCH',
+          body: { fee },
+        }),
+    ),
+
   /** GET /api/v1/reports/channel-sales - net sales per channel from orders. */
   getChannelSalesReport: (query: ChannelSalesQuery = {}): Promise<ChannelSalesReport> =>
     demo(
@@ -237,6 +250,13 @@ export const api = {
     demo(
       () => mockApi.cogsReport(query),
       () => request<CogsReportResponse>(withQuery('/api/v1/reports/cogs', { ...query })),
+    ),
+
+  /** GET /api/v1/reports/profit - 403 for roles without cost:read. */
+  getProfitReport: (query: ProfitQuery): Promise<ProfitReportResponse> =>
+    demo(
+      () => mockApi.profitReport(query),
+      () => request<ProfitReportResponse>(withQuery('/api/v1/reports/profit', { ...query })),
     ),
 };
 

@@ -16,6 +16,7 @@ import { ApiError } from './api-error';
 import type {
   ApplyImportResult,
   Channel,
+  ChannelProfitRow,
   ChannelSalesQuery,
   ChannelSalesReport,
   ChannelSalesRow,
@@ -24,6 +25,7 @@ import type {
   CogsReportRow,
   CreateOrderInput,
   DashboardSummary,
+  FeeSource,
   HealthResponse,
   ImportBatch,
   ImportDetailResponse,
@@ -41,6 +43,9 @@ import type {
   OrdersQuery,
   OrdersResponse,
   PreviewOrder,
+  ProfitOrderRow,
+  ProfitQuery,
+  ProfitReportResponse,
   ReceiveStockInput,
   ReturnOrderLineInput,
   StockLotRow,
@@ -991,6 +996,123 @@ const cogsRows: CogsReportRow[] = COGS_SEED.map(
 );
 
 // ---------------------------------------------------------------------------
+// Profit report - four fixed bills so the fee math stays readable in the demo
+// ---------------------------------------------------------------------------
+
+interface ProfitSeed {
+  ref: string;
+  channelId: string;
+  status: Order['status'];
+  customer: string;
+  grandTotal: number;
+  platformFee: number;
+  feeSource: FeeSource;
+  cogs: number;
+  qty: number;
+  daysAgo: number;
+  variantId: string;
+}
+
+/** Three Shopee sales and one POS counter sale; the third bill is returned in
+ *  full so the report can show an honest all-zero row instead of negative
+ *  money that no ledger ever produced. */
+const PROFIT_SEED: ProfitSeed[] = [
+  {
+    ref: '240618AAA1111',
+    channelId: 'ch_shopee_main',
+    status: 'delivered',
+    customer: 'somchai***41',
+    grandTotal: 152_300,
+    // The seeded Shopee rate (1400 bps) applied at import time, exactly what
+    // computePlatformFee would store for this bill.
+    platformFee: 21_322,
+    feeSource: 'channel_default',
+    cogs: 89_450,
+    qty: 2,
+    daysAgo: 1,
+    variantId: 'var_hoe_4h',
+  },
+  {
+    ref: '240618BBB2222',
+    channelId: 'ch_shopee_main',
+    status: 'shipped',
+    customer: 'kanya***17',
+    grandTotal: 96_400,
+    platformFee: 13_496,
+    feeSource: 'channel_default',
+    cogs: 61_500,
+    qty: 1,
+    daysAgo: 2,
+    variantId: 'var_spade_stl',
+  },
+  {
+    ref: '240617CCC3333',
+    channelId: 'ch_shopee_main',
+    status: 'returned',
+    customer: 'pong***99',
+    grandTotal: 78_000,
+    platformFee: 10_920,
+    feeSource: 'channel_default',
+    cogs: 45_900,
+    qty: 1,
+    daysAgo: 3,
+    variantId: 'var_machete_12',
+  },
+  {
+    ref: 'POS-2024-0452',
+    channelId: 'ch_pos_shop',
+    status: 'delivered',
+    customer: 'ลูกค้าหน้าร้าน',
+    grandTotal: 64_500,
+    // The counter pays no marketplace fee, so it has nothing to strip.
+    platformFee: 0,
+    feeSource: 'none',
+    cogs: 41_200,
+    qty: 2,
+    daysAgo: 1,
+    variantId: 'var_hoe_4h',
+  },
+];
+
+const MOCK_PROFIT_ORDERS: Order[] = PROFIT_SEED.map((seed) => {
+  const channel = MOCK_CHANNELS.find((c) => c.id === seed.channelId);
+  const variant = MOCK_VARIANTS.find((v) => v.id === seed.variantId);
+  if (!variant) throw new Error(`demo fixtures must keep the ${seed.variantId} variant`);
+  // One line per bill, priced so unitPrice * qty sums back to the grand total.
+  const unitPrice = Math.floor(seed.grandTotal / seed.qty);
+  const lineTotal = unitPrice * seed.qty;
+  return {
+    id: `ord_pft_${seed.ref}`,
+    orgId: DEMO_ORG_ID,
+    channelId: seed.channelId,
+    channelName: channel?.name ?? 'ไม่ทราบช่องทาง',
+    channelKind: channel?.kind ?? 'manual',
+    externalOrderId: seed.ref,
+    status: seed.status,
+    customerName: seed.customer,
+    orderedAt: iso(seed.daysAgo, 13, (seed.daysAgo * 17) % 60),
+    grandTotal: lineTotal,
+    cogs: seed.cogs,
+    margin: lineTotal - seed.cogs,
+    platformFee: seed.platformFee,
+    feeSource: seed.feeSource,
+    lines: [
+      {
+        id: `oln_${seed.ref}_1`,
+        variantId: variant.id,
+        sku: variant.sku,
+        name: variant.name,
+        quantity: seed.qty,
+        unitPrice,
+        discount: 0,
+        lineTotal,
+        totalCost: seed.cogs,
+      },
+    ],
+  };
+});
+
+// ---------------------------------------------------------------------------
 // Sample import file - powers the "ใช้ไฟล์ตัวอย่าง" button on /imports/new
 // ---------------------------------------------------------------------------
 
@@ -1320,6 +1442,29 @@ export const mockApi = {
     return [];
   },
 
+  // The real route needs cost:write and answers with the fresh order; the mock
+  // mirrors both so the demo refuses sales exactly like the live backend.
+  setOrderFee: (orderId: string, fee: number): Order => {
+    const { role } = getDemoIdentity();
+    if (!can(role, 'cost:write')) {
+      throw new ApiError('forbidden', 'ไม่มีสิทธิ์แก้ไขค่าธรรมเนียม (ต้องการสิทธิ์ cost:write)', 403, {
+        permission: 'cost:write',
+      });
+    }
+    const order = mockOrders.find((o) => o.id === orderId);
+    const profitIdx = MOCK_PROFIT_ORDERS.findIndex((o) => o.id === orderId);
+    const source = order ?? MOCK_PROFIT_ORDERS[profitIdx];
+    if (!source) throw notFound(`ออเดอร์ ${orderId}`);
+    // Same replace-in-array idiom as cancelOrder above: rows are treated as
+    // immutable so every caller re-reads the same updated bill. The fee lands
+    // in BOTH stores so an override on a profit-fixture bill shows up in the
+    // report instead of leaving the two demo stores disagreeing.
+    const updated: Order = { ...source, platformFee: fee, feeSource: 'manual' };
+    mockOrders = mockOrders.map((o) => (o.id === orderId ? updated : o));
+    if (profitIdx >= 0) MOCK_PROFIT_ORDERS[profitIdx] = updated;
+    return gate(updated);
+  },
+
   channelSales: (query: ChannelSalesQuery = {}): ChannelSalesReport => {
     const days = query.days ?? 7;
     const rows: ChannelSalesRow[] = [
@@ -1432,6 +1577,97 @@ export const mockApi = {
         { unitsSold: 0, revenue: 0, cogs: 0, margin: 0 },
       ),
     };
+  },
+
+  profitReport: (query: ProfitQuery): ProfitReportResponse => {
+    const { role } = getDemoIdentity();
+    // Same honest 403 as cogsReport above: the real API blocks the whole
+    // endpoint without cost:read; a stripped report would be an empty table.
+    if (!can(role, 'cost:read')) {
+      throw new ApiError('forbidden', 'ไม่มีสิทธิ์ดูรายงานกำไร (ต้องการสิทธิ์ cost:read)', 403, {
+        permission: 'cost:read',
+      });
+    }
+    // Same Bangkok-inclusive day boundaries as the real report service.
+    const fromAt = new Date(`${query.from}T00:00:00+07:00`).getTime();
+    const toAt = new Date(new Date(`${query.to}T00:00:00+07:00`).getTime() + 86_400_000).getTime();
+    const scoped = MOCK_PROFIT_ORDERS.filter((order) => {
+      const at = new Date(order.orderedAt).getTime();
+      if (at < fromAt || at >= toAt) return false;
+      return query.channelId === undefined || order.channelId === query.channelId;
+    });
+    const rows: ProfitOrderRow[] = scoped.map((order) => {
+      const unitsSold = order.lines.reduce((sum, line) => sum + line.quantity, 0);
+      // The demo keeps no return ledger, so a returned bill is fully returned:
+      // every money column zeroes out, the same degrade path orderProfit()
+      // takes when the net units reach zero.
+      const fullyReturned = order.status === 'returned';
+      const revenue = fullyReturned ? 0 : order.grandTotal;
+      const fee = fullyReturned ? 0 : (order.platformFee ?? 0);
+      const cogs = fullyReturned ? 0 : (order.cogs ?? 0);
+      return {
+        id: order.id,
+        externalOrderId: order.externalOrderId,
+        channelId: order.channelId,
+        channelName: order.channelName ?? 'ไม่ทราบช่องทาง',
+        channelKind: order.channelKind,
+        status: order.status,
+        orderedAt: order.orderedAt,
+        unitsSold,
+        unitsReturned: fullyReturned ? unitsSold : 0,
+        revenue,
+        fee,
+        cogs,
+        profit: revenue - fee - cogs,
+        feeSource: order.feeSource ?? 'none',
+      };
+    });
+    // Group the full set, then sort biggest profit first, mirroring the service
+    // so a page cut can never skew the per-channel view.
+    const byChannel = new Map<string, ChannelProfitRow>();
+    for (const row of rows) {
+      const agg = byChannel.get(row.channelId) ?? {
+        channelId: row.channelId,
+        channelName: row.channelName,
+        channelKind: row.channelKind,
+        orders: 0,
+        unitsSold: 0,
+        unitsReturned: 0,
+        revenue: 0,
+        fee: 0,
+        cogs: 0,
+        profit: 0,
+      };
+      agg.orders += 1;
+      agg.unitsSold += row.unitsSold;
+      agg.unitsReturned += row.unitsReturned;
+      agg.revenue += row.revenue;
+      agg.fee = (agg.fee ?? 0) + (row.fee ?? 0);
+      agg.cogs = (agg.cogs ?? 0) + (row.cogs ?? 0);
+      agg.profit = (agg.profit ?? 0) + (row.profit ?? 0);
+      byChannel.set(row.channelId, agg);
+    }
+    const channelRows = [...byChannel.values()].sort(
+      (a, b) => (b.profit ?? 0) - (a.profit ?? 0) || a.channelId.localeCompare(b.channelId),
+    );
+    return gate({
+      from: query.from,
+      to: query.to,
+      channelId: query.channelId,
+      ordersInWindow: rows.length,
+      // Rows cap at the query's limit; channelRows and totals never truncate.
+      rows: rows.slice(0, query.limit ?? 200),
+      channelRows,
+      totals: {
+        orders: rows.length,
+        unitsSold: rows.reduce((sum, row) => sum + row.unitsSold, 0),
+        unitsReturned: rows.reduce((sum, row) => sum + row.unitsReturned, 0),
+        revenue: rows.reduce((sum, row) => sum + row.revenue, 0),
+        fee: rows.reduce((sum, row) => sum + (row.fee ?? 0), 0),
+        cogs: rows.reduce((sum, row) => sum + (row.cogs ?? 0), 0),
+        profit: rows.reduce((sum, row) => sum + (row.profit ?? 0), 0),
+      },
+    });
   },
 };
 
