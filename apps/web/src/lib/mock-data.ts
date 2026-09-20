@@ -1023,8 +1023,9 @@ const PROFIT_SEED: ProfitSeed[] = [
     status: 'delivered',
     customer: 'somchai***41',
     grandTotal: 152_300,
-    // 3% channel default, already rounded to whole satang at import time.
-    platformFee: 4_569,
+    // The seeded Shopee rate (1400 bps) applied at import time, exactly what
+    // computePlatformFee would store for this bill.
+    platformFee: 21_322,
     feeSource: 'channel_default',
     cogs: 89_450,
     qty: 2,
@@ -1037,7 +1038,7 @@ const PROFIT_SEED: ProfitSeed[] = [
     status: 'shipped',
     customer: 'kanya***17',
     grandTotal: 96_400,
-    platformFee: 2_892,
+    platformFee: 13_496,
     feeSource: 'channel_default',
     cogs: 61_500,
     qty: 1,
@@ -1050,7 +1051,7 @@ const PROFIT_SEED: ProfitSeed[] = [
     status: 'returned',
     customer: 'pong***99',
     grandTotal: 78_000,
-    platformFee: 2_340,
+    platformFee: 10_920,
     feeSource: 'channel_default',
     cogs: 45_900,
     qty: 1,
@@ -1451,11 +1452,16 @@ export const mockApi = {
       });
     }
     const order = mockOrders.find((o) => o.id === orderId);
-    if (!order) throw notFound(`ออเดอร์ ${orderId}`);
+    const profitIdx = MOCK_PROFIT_ORDERS.findIndex((o) => o.id === orderId);
+    const source = order ?? MOCK_PROFIT_ORDERS[profitIdx];
+    if (!source) throw notFound(`ออเดอร์ ${orderId}`);
     // Same replace-in-array idiom as cancelOrder above: rows are treated as
-    // immutable so every caller re-reads the same updated bill.
-    const updated: Order = { ...order, platformFee: fee, feeSource: 'manual' };
+    // immutable so every caller re-reads the same updated bill. The fee lands
+    // in BOTH stores so an override on a profit-fixture bill shows up in the
+    // report instead of leaving the two demo stores disagreeing.
+    const updated: Order = { ...source, platformFee: fee, feeSource: 'manual' };
     mockOrders = mockOrders.map((o) => (o.id === orderId ? updated : o));
+    if (profitIdx >= 0) MOCK_PROFIT_ORDERS[profitIdx] = updated;
     return gate(updated);
   },
 
