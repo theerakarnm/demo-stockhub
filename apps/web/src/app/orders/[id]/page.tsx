@@ -24,8 +24,10 @@ import {
   CardBody,
   CardHeader,
   CardSkeleton,
+  Dialog,
   EmptyState,
   ErrorState,
+  Input,
   PageHeader,
   Table,
   TableSkeleton,
@@ -38,15 +40,16 @@ import {
   buttonClass,
 } from '@/components/ui';
 import { api } from '@/lib/api-client';
+import type { ApiError } from '@/lib/api-error';
 import { customersApi } from '@/lib/api-pricing';
-import type { Movement, Order, ReturnOrderLineInput } from '@/lib/api-types';
-import { baht, formatDateTime, qty } from '@/lib/format';
+import type { FeeSource, Movement, Order, ReturnOrderLineInput } from '@/lib/api-types';
+import { baht, formatDateTime, money, qty } from '@/lib/format';
 import { useApi, useMutation } from '@/lib/use-api';
 import type { OrderStatus } from '@stockhub/core';
 import { Ban, Printer, ReceiptText, RotateCcw } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 /** Statuses the API accepts for POST /orders/:id/cancel. */
 const CANCELLABLE_STATUSES: readonly OrderStatus[] = [
@@ -58,6 +61,15 @@ const CANCELLABLE_STATUSES: readonly OrderStatus[] = [
 
 /** A return needs units that physically left: shipped or delivered only. */
 const RETURNABLE_STATUSES: readonly OrderStatus[] = ['shipped', 'delivered'];
+
+/** Thai copy for each fee source, so a manager can tell a typed fee from a
+    channel default at a glance when auditing a bill's profit. */
+const FEE_SOURCE_LABELS: Record<FeeSource, string> = {
+  none: 'ไม่มี',
+  manual: 'ตั้งเอง',
+  channel_default: 'ตามช่องทางขาย',
+  exported: 'จากแพลตฟอร์ม',
+};
 
 /** One cancelled/returned order's ledger result, so the user sees stock go back. */
 function MovementsBanner({ title, movements }: { title: string; movements: readonly Movement[] }) {
@@ -157,7 +169,7 @@ function BillLinesCard({ order }: { order: Order }) {
   );
 }
 
-function BillTotalsCard({ order }: { order: Order }) {
+function BillTotalsCard({ order, onEditFee }: { order: Order; onEditFee?: () => void }) {
   return (
     <Card>
       <CardHeader title="สรุปยอด" description="ทั้งหมดเป็นเงินรวมสุทธิหลังหักส่วนลด" />
@@ -172,6 +184,24 @@ function BillTotalsCard({ order }: { order: Order }) {
           <span className="text-slate-500">ต้นทุนขาย (FIFO)</span>
           <CostValue value={order.cogs} />
         </div>
+        {/* Fee override is management info, so only cost:write sees the row and
+            the edit button; the API strips the fields for everyone else anyway. */}
+        <PermissionGate permission="cost:write">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-slate-500">ค่าธรรมเนียมแพลตฟอร์ม</span>
+            <span className="flex items-center gap-2">
+              <CostValue value={order.platformFee} />
+              {order.feeSource !== undefined ? (
+                <span className="text-xs text-slate-400">{FEE_SOURCE_LABELS[order.feeSource]}</span>
+              ) : null}
+              {onEditFee ? (
+                <Button variant="outline" size="sm" onClick={onEditFee}>
+                  แก้ไข
+                </Button>
+              ) : null}
+            </span>
+          </div>
+        </PermissionGate>
         <div className="flex items-center justify-between">
           <span className="text-slate-500">กำไรขั้นต้น</span>
           <CostValue
@@ -181,6 +211,87 @@ function BillTotalsCard({ order }: { order: Order }) {
         </div>
       </CardBody>
     </Card>
+  );
+}
+
+interface FeeEditDialogProps {
+  open: boolean;
+  onClose: () => void;
+  pending: boolean;
+  error: ApiError | null;
+  /** Fee currently on the bill, in satang; the input starts from it. */
+  currentFee?: number;
+  /** Called with the fee in satang once the user confirms. */
+  onConfirm: (fee: number) => void;
+}
+
+/** Fee override dialog. The input is baht, the wire format is satang: the
+    submit conversion is Math.round(Number(value) * 100), the same integer
+    satang the API schema stores. */
+function FeeEditDialog({
+  open,
+  onClose,
+  pending,
+  error,
+  currentFee,
+  onConfirm,
+}: FeeEditDialogProps) {
+  const [value, setValue] = useState('');
+
+  // Re-seed on every open so the input shows the fee currently on the bill,
+  // not whatever the user typed the last time around.
+  useEffect(() => {
+    if (open) setValue(currentFee === undefined ? '' : money(currentFee));
+  }, [open, currentFee]);
+
+  // The API schema wants a nonnegative integer satang amount; mirror the
+  // nonnegative/finite part here so the button mirrors what the API accepts.
+  // The seed (and any pasted value) can carry a locale comma: drop it before
+  // Number() so a prefilled amount stays submittable as-is.
+  const parsed = Number(value.replace(/[,\s]/g, ''));
+  const ready = value.trim() !== '' && Number.isFinite(parsed) && parsed >= 0;
+
+  const close = (): void => {
+    setValue('');
+    onClose();
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onClose={close}
+      title="แก้ไขค่าธรรมเนียมแพลตฟอร์ม"
+      description="ตั้งค่าธรรมเนียมของบิลนี้เอง หน่วยเป็นบาท"
+      footer={
+        <>
+          <Button variant="outline" onClick={close}>
+            ปิด
+          </Button>
+          <Button
+            loading={pending}
+            disabled={!ready}
+            onClick={() => onConfirm(Math.round(parsed * 100))}
+          >
+            บันทึก
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3 text-sm text-slate-700">
+        <Input
+          label="ค่าธรรมเนียมแพลตฟอร์ม (บาท)"
+          name="platformFee"
+          inputMode="decimal"
+          placeholder="เช่น 35 หรือ 35.50"
+          hint={currentFee !== undefined ? `ปัจจุบัน ${baht(currentFee)}` : undefined}
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+        />
+        {error ? (
+          <p className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">{error.message}</p>
+        ) : null}
+      </div>
+    </Dialog>
   );
 }
 
@@ -234,6 +345,7 @@ export default function OrderDetailPage() {
 
   const [cancelOpen, setCancelOpen] = useState(false);
   const [returnOpen, setReturnOpen] = useState(false);
+  const [feeOpen, setFeeOpen] = useState(false);
 
   const { data, error, loading, reload } = useApi(() => api.getOrder(orderId), [orderId, role]);
 
@@ -252,6 +364,7 @@ export default function OrderDetailPage() {
 
   const cancel = useMutation((reason: string) => api.cancelOrder(orderId, reason));
   const doReturn = useMutation((lines: ReturnOrderLineInput[]) => api.returnOrder(orderId, lines));
+  const setFee = useMutation((fee: number) => api.setOrderFee(orderId, fee));
 
   const status = data?.status;
   const canCancel = status !== undefined && CANCELLABLE_STATUSES.includes(status);
@@ -275,6 +388,14 @@ export default function OrderDetailPage() {
     void doReturn.run(lines).then((movements) => {
       if (movements === null) return;
       closeDialogs();
+      reload();
+    });
+  };
+
+  const confirmFee = (fee: number): void => {
+    void setFee.run(fee).then((updated) => {
+      if (updated === null) return;
+      setFeeOpen(false);
       reload();
     });
   };
@@ -366,7 +487,7 @@ export default function OrderDetailPage() {
             </div>
             <div className="space-y-4">
               <BillInfoCard order={data} customer={customer.data} />
-              <BillTotalsCard order={data} />
+              <BillTotalsCard order={data} onEditFee={() => setFeeOpen(true)} />
               <p className="flex items-center gap-1.5 px-1 text-xs text-slate-400">
                 <ReceiptText className="size-3.5" aria-hidden />
                 เลขที่ออเดอร์ภายใน {data.id}
@@ -392,6 +513,14 @@ export default function OrderDetailPage() {
             pending={doReturn.pending}
             error={doReturn.error}
             onConfirm={confirmReturn}
+          />
+          <FeeEditDialog
+            open={feeOpen}
+            onClose={() => setFeeOpen(false)}
+            pending={setFee.pending}
+            error={setFee.error}
+            currentFee={data.platformFee}
+            onConfirm={confirmFee}
           />
         </>
       ) : null}
