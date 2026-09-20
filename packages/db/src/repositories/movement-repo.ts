@@ -25,7 +25,7 @@ import {
 import { and, asc, desc, eq, gte, inArray, lt, lte, notInArray, sql } from 'drizzle-orm';
 import type { DbExecutor } from '../client';
 import {
-  type channels,
+  channels,
   movementLotConsumptions,
   orders,
   products,
