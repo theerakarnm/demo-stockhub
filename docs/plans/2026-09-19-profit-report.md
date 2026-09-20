@@ -645,7 +645,7 @@ Read the channel row once before the loop: `const channels = await channelRepo.l
 - [x] Step 2: Submit through `useMutation((fee: number) => api.setOrderFee(orderId, fee))`, on success refresh the order query (the hook pattern the cancel flow already uses) and close the dialog; keep loading / error states on the dialog submit button like the cancel dialog.
 - [x] Step 3: Verify - Run: `bun run --filter @stockhub/web typecheck && bun run --filter @stockhub/web lint` - Expected: both exit 0.
 - [x] Step 4: Verify - Manual: start the API only (`cd apps/api && bun run dev`), then as manager `curl -X PATCH localhost:8787/api/v1/orders/<billId>/fee -H 'content-type: application/json' -H 'x-demo-role: manager' -d '{"fee":3500}'` - Expected: HTTP 200 and `"feeSource":"manual"` in the JSON; repeat with `-H 'x-demo-role: sales'` - Expected: HTTP 403. (`<billId>`: create a bill first via `POST /api/v1/orders` or reuse one from the seeded data - a pending seed order is fine, fees are status-independent.)
-- [ ] Step 5: Commit - `git commit -m "Add fee override to the order page"`
+- [x] Step 5: Commit - `git commit -m "Add fee override to the order page"`
 
 ## Failure handling summary
 
