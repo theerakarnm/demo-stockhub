@@ -11,7 +11,16 @@
  */
 
 import { sql } from 'drizzle-orm';
-import { boolean, check, index, integer, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  check,
+  index,
+  integer,
+  pgTable,
+  text,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 import { primaryId, timestamps } from './_shared';
 import { variants } from './catalog';
 import { channelKindEnum, matchSourceEnum } from './enums';
@@ -35,7 +44,10 @@ export const channels = pgTable(
   (table) => [
     index('channels_org_idx').on(table.orgId),
     index('channels_org_kind_idx').on(table.orgId, table.kind),
-    check('channels_fee_rate_bps_range', sql`${table.feeRateBps} >= 0 AND ${table.feeRateBps} <= 10000`),
+    check(
+      'channels_fee_rate_bps_range',
+      sql`${table.feeRateBps} >= 0 AND ${table.feeRateBps} <= 10000`,
+    ),
   ],
 );
 
